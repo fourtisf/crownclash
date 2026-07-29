@@ -136,10 +136,10 @@ let homeBound = false;
 /**
  * B1 — bound once for the lifetime of the page, not once per Home render.
  *
- * `main.ts` also binds a `#btnBattle` delegate. Both fire on one tap, but `findMatch()`
- * flips its `searching` guard synchronously before it touches audio or the modal, so the
- * second call returns immediately and nothing is duplicated. Keeping this one means the Home
- * screen still works if it is ever mounted without `main.ts`'s wiring.
+ * The prototype bound this *inside* `refreshHome()`, so every visit to the Home tab attached
+ * another BATTLE handler and the Nth visit fired `findMatch()` N times. This module is the
+ * sole owner of the delegate; `findMatch()` also holds a synchronous `searching` guard, so a
+ * double tap cannot stack two matchmaking modals either.
  */
 function bindHomeOnce(): void {
   if (homeBound) return;

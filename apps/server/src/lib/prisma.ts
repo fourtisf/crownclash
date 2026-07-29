@@ -3,20 +3,20 @@
  *
  * ## Why the client is typed by hand here
  *
- * `prisma/schema.prisma` lives at the monorepo root but `@prisma/client` is a dependency of
- * `apps/server`. Under pnpm's strict layout the CLI cannot resolve the client package from
- * the schema's directory, so `prisma generate` refuses to run until `@prisma/client` is also
- * a root dependency (noted in the handover — it is a one-line fix to the root package.json).
+ * `prisma/schema.prisma` lives at the monorepo root, so the CLI resolves `@prisma/client`
+ * from there; it is now a root devDependency and `prisma generate` succeeds. What stays
+ * hand-written is the *type* surface: the delegate shapes the store uses are declared
+ * structurally below and the real client is loaded through a runtime import.
  *
- * Rather than make the whole server un-typecheckable and un-testable until that happens, the
- * delegate surface the store actually uses is declared structurally below and the real client
- * is loaded through a runtime import. The trade is real but small: query arguments are
- * checked against the shapes in this file instead of against generated model types. The
- * argument objects are all built in exactly one place (`store-prisma.ts`), the schema is 4
- * models long, and integration against a live database is what proves the mapping either way.
+ * That keeps typecheck, tests and CI working on a clean checkout, where nobody has run
+ * `prisma generate` yet and the generated types do not exist. A static
+ * `import { PrismaClient } from '@prisma/client'` would make the whole server
+ * un-typecheckable until a database-adjacent codegen step had run — a bad trade for a
+ * four-model schema whose query arguments are all built in one file (`store-prisma.ts`).
  *
- * Once `@prisma/client` is a root dependency this file can be replaced by
- * `import { PrismaClient } from '@prisma/client'` with no change to any caller.
+ * The cost is that arguments are checked against the shapes here rather than generated model
+ * types, so this file and the schema must be kept in step by hand. Swapping to the generated
+ * types is a safe follow-up once codegen is wired into the install step.
  */
 import { env } from './env.js';
 import { logger } from './logger.js';

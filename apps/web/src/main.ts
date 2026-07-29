@@ -91,21 +91,10 @@ async function init(): Promise<void> {
   bindModals();
   initBattle({ onFinish: (id, log) => void finishMatch(id, log), go });
 
-  // L2538-2541 fixed (B1): the BATTLE button is bound once here, not inside refreshHome().
-  // In the prototype every visit to the Home tab attached another handler, so the Nth visit
-  // fired findMatch() N times and stacked N matchmaking modals.
-  must('#homeBody').addEventListener('click', (e) => {
-    const t = e.target as HTMLElement | null;
-    if (t && typeof t.closest === 'function' && t.closest('#btnBattle')) void findMatch(startBattle);
-  });
-
-  must('#navbar').addEventListener('click', (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>('.navbtn');
-    if (!b) return;
-    Snd.init();
-    Snd.play(660, 0.05, 'triangle', 0.05);
-    setTab(b.dataset.tab as string);
-  });
+  // The `#homeBody` (BATTLE) and `#navbar` delegates live in screens/home.ts and ui/tabs.ts,
+  // each bound once behind its own guard. main.ts used to bind its own copies too, which meant
+  // two handlers raced on every tap and both modules had to defend against the other. One
+  // owner each is simpler and removes the coupling.
 
   let result: Awaited<ReturnType<typeof boot>>;
   try {

@@ -17,46 +17,42 @@ Things that must be true before `ops/deploy.sh` can succeed. Check them; do not 
 | # | Check | How |
 |---|---|---|
 | 1 | `prisma/migrations/` exists and is committed | `ls prisma/migrations` — see [§ Migrations](#migrations). `prisma/schema.prisma` alone is not enough. |
-| 2 | The compiled server can import `@crown/shared` under plain Node | **Known to fail as of this writing — see below.** `cd apps/server && node -e "import('@crown/shared').then(()=>console.log('ok'))"` |
+| 2 | The compiled server boots under plain Node | `pnpm -r build`, then `cd apps/server && node -e "import('@crown/shared').then(()=>console.log('ok'))"`. Passes as of this commit — see below for why it is still on the list. |
 | 3 | PM2's entrypoints resolve | `node -e "console.log(require('./ecosystem.config.js').apps.map(a=>a.script))"` after a build. Both paths must exist on disk. |
-| 4 | `nginx -t` passes with the real hostname substituted | Three `server_name` lines in `ops/nginx/crown-clash.conf`. |
+| 4 | `nginx -t` passes with the real hostname substituted | Two `server_name` lines in `ops/nginx/crown-clash.conf` (one per `server` block; each names the apex and `www`). `nginx -t` checks the config and the files it references — snippets, TLS cert — but **not** `root`, so it passes even with no static release published. |
 | 5 | Secrets are real | `AUTH_SECRET` and `COOKIE_SECRET` are ≥16 chars and are not the `dev-only-…` placeholders — the API refuses to boot in production otherwise, by design. |
 | 6 | CI is green on the commit being deployed | Especially `node tools/extract.mjs --check`. |
 
-### Check 2: the compiled server cannot start yet
+### Check 2: the compiled server boots
 
-Verified against this commit, after a full `pnpm -r build`:
+This one used to fail and now passes; it stays on the list because it is the single check that
+nothing else in the repo can make for you.
 
-```
-$ node apps/server/dist/src/index.js
-Error [ERR_MODULE_NOT_FOUND]: Cannot find module
-  '/…/packages/shared/src/types.js' imported from '/…/packages/shared/src/index.ts'
-```
+`@crown/shared` exports an ESM conditional map (`development` → `./src/index.ts`, `default` →
+`./dist/index.js`). Vite and Vitest resolve the source condition, so **dev, tests and typecheck
+all stay green no matter what the `default` branch says** — only plain `node`, which is what PM2
+runs, ever exercises it. That asymmetry is permanent, so any future change to that package's
+`exports`, `files` or build output can break production while every gate in CI stays green.
 
-`packages/shared/package.json` declares `"exports": { ".": "./src/index.ts" }` — TypeScript
-source. Node 22 strips the types and then tries to honour the `.js` specifiers that file uses
-(`export * from './types.js'`), which only resolve against **compiled** output. `pnpm -r build`
-does produce that output at `packages/shared/dist/src/`, but the exports map never points at it.
+Verified against this commit, after `pnpm -r build`:
 
-Consequences: `pnpm dev` and the test suites are fine (Vite and Vitest alias the package to its
-source), and so is `tsc`. Only the plain-`node` production path breaks — which means PM2 would
-crash-loop `crown-api` on the first boot. `ops/deploy.sh` catches it at the health check and rolls
-back, so it fails safe, but it fails.
-
-The fix is one field in `packages/shared/package.json`, owned by whoever owns that package:
-
-```json
-"exports": {
-  ".": {
-    "types": "./dist/src/index.d.ts",
-    "node": "./dist/src/index.js",
-    "default": "./src/index.ts"
-  }
-}
+```bash
+cd apps/server
+NODE_ENV=production AUTH_SECRET=<32+ chars> COOKIE_SECRET=<32+ chars> \
+  HOST=127.0.0.1 PORT=18099 node --enable-source-maps dist/src/index.js
+# another shell:
+curl -s http://127.0.0.1:18099/api/health
+# {"ok":true,"env":"production","redis":"memory","redisStatus":"memory-fallback","uptime":1}
 ```
 
-Re-run check 2 before scheduling a deploy. Do not work around it in the ops layer — a bundler or
-a loader flag bolted onto the PM2 entry would hide the same problem from the tests.
+`"redis":"memory"` there is expected in that throwaway run — no `REDIS_URL` was set. In
+production it must read `"redis"`; see [Monitoring](#monitoring).
+
+If this ever fails again with `ERR_MODULE_NOT_FOUND` for a `packages/shared/src/*.js` path, the
+cause is the same as last time: the exports map pointing Node at TypeScript source, whose `.js`
+specifiers only resolve against compiled output. Fix it in `packages/shared/package.json`. Do not
+work around it in the ops layer — a bundler or a loader flag bolted onto the PM2 entry would hide
+the same problem from the tests all over again.
 
 ### Check 3: PM2's entrypoints
 
@@ -65,8 +61,12 @@ and the real entrypoints are `apps/server/dist/src/index.js` and `dist/src/worke
 `dist/index.js`. (`apps/server/tsconfig.build.json` narrows the inputs to `src/` for the
 production build but keeps that layout deliberately.) `ecosystem.config.js` probes both layouts
 rather than hardcoding one, so it survives that tsconfig being tightened later.
-`apps/server/package.json`'s `start` script still says `node dist/index.js` and is wrong today;
-PM2 does not use it.
+`apps/server/package.json`'s `start` and `worker` scripts point at the same `dist/src/…` paths;
+PM2 does not use them, but if they ever disagree with the config, the layout has moved and this
+check is the one that catches it.
+
+CI runs this assertion after every build (`.github/workflows/ci.yml`, "PM2 entrypoints resolve"),
+so a tsconfig change that relocates the output fails there rather than at 2am on the VPS.
 
 ---
 
@@ -186,8 +186,10 @@ Static and API cut over at slightly different moments (symlink swap, then a roll
 a few seconds). That window is safe as long as the API change is backwards-compatible with the
 previous bundle for those seconds — the same constraint as the migration rule below.
 
-A deploy takes roughly a minute, most of it the build. nginx is not reloaded: it only needs a
-reload when `ops/nginx/*` changes.
+Budget several minutes, most of it `pnpm install` and the build — the workspace builds in about
+20 s on a developer machine, and a 2 vCPU VPS is slower, but this has never been timed on real
+hardware, so treat any number here as a guess until you have measured your own. nginx is not
+reloaded: it only needs a reload when `ops/nginx/*` changes.
 
 **When the nginx config changes**, the symlinks from `ops/README.md` §8 mean `git pull` already
 updated the live file — you still have to `sudo nginx -t && sudo systemctl reload nginx`.
@@ -203,16 +205,36 @@ it:
 ```bash
 DATABASE_URL='postgresql://crown:crown@localhost:5432/crown_dev?schema=public' \
   pnpm --filter @crown/server exec prisma migrate dev \
-    --schema "$PWD/prisma/schema.prisma" --name init
+    --schema "$PWD/prisma/schema.prisma" --name init --skip-generate
 git add prisma/migrations && git commit
 ```
 
-The `--filter @crown/server` is not decoration. `@prisma/client` is a dependency of
-`apps/server` only, and under pnpm's strict layout it is not resolvable from the repo root — so
-`prisma generate` (and therefore the root `pnpm db:generate` script) fails there. `ops/deploy.sh`
-runs Prisma from `apps/server` with an explicit `--schema` for the same reason. Adding
-`@prisma/client` to the root `package.json` would make the root scripts work; until someone does,
-use the filtered form.
+### Why `--skip-generate`, and why the root `db:generate` script fails
+
+`prisma generate` resolves `@prisma/client` by walking up from **the directory that contains the
+schema** — not from the working directory, and not from whichever workspace package invoked it.
+The schema lives at the repo root, and under pnpm's strict layout `@prisma/client` is a
+dependency of `apps/server` only, so from the root it is unresolvable. The CLI then either aborts
+with `Could not resolve @prisma/client` or tries to `pnpm add` it mid-command, which would mutate
+a tracked `package.json`. `--filter @crown/server` does not help; the filter changes the working
+directory, and the working directory is not what Prisma looks at. Both were verified against this
+commit.
+
+Consequences, all of them load-bearing:
+
+* `prisma migrate dev` runs a generate step at the end, so it needs `--skip-generate` here or it
+  fails *after* writing the migration and leaves you unsure whether it worked.
+* The root `pnpm db:generate` script fails, for the same reason.
+  `apps/server/src/lib/prisma.ts` documents the same constraint from the other side — it is why
+  the delegate surface in that file is typed by hand.
+* `ops/deploy.sh` generates against an untracked symlink it creates at
+  `apps/server/.prisma-schema.prisma`, so the lookup starts inside `apps/server`. It runs
+  `migrate deploy` against the **real** root path, because `migrate deploy` looks for
+  `migrations/` next to the schema it is given and does not need `@prisma/client` at all.
+
+**The permanent fix is one line** — add `"@prisma/client": "^5.22.0"` to the root
+`package.json`'s dependencies. After that the symlink, the `--filter`, and `--skip-generate` can
+all go, and `prisma.ts` can `import { PrismaClient } from '@prisma/client'` like a normal file.
 
 `ops/deploy.sh` runs `prisma migrate deploy`, which only ever *applies* committed migrations. It
 never generates, never resets, never prompts. If `prisma/migrations/` is missing the script stops
@@ -239,6 +261,9 @@ set -a && . /etc/crown-clash/app.env && set +a
 pnpm --filter @crown/server exec prisma migrate status --schema "$PWD/prisma/schema.prisma"
 ```
 
+`migrate status`, like `migrate deploy`, takes the **root** schema path: it reads
+`prisma/migrations/` next to the schema and never touches `@prisma/client`.
+
 ---
 
 ## Rollback
@@ -247,7 +272,16 @@ pnpm --filter @crown/server exec prisma migrate status --schema "$PWD/prisma/sch
 
 `ops/deploy.sh` rolls back automatically: any failure after checkout restores the previous commit
 and the previous static release, rebuilds, reloads, and re-runs the health check. If that second
-check also fails it exits loudly rather than pretending.
+check also fails it exits loudly rather than pretending. Verified against stubbed
+`git`/`pnpm`/`pm2`/`curl` for a failing build, a failing health check, a missing
+`prisma/migrations/`, a repeat deploy, release pruning and the concurrency lock. The real `pm2`
+and `nginx` halves have never run.
+
+That automatic rollback depends on the `-E` in `set -Eeuo pipefail`, and non-obviously so: bash
+does not inherit an `ERR` trap into shell functions without it, and every command that can fail
+here fails inside `build_and_reload`. Without `-E` the script exits 1 and the rollback never runs
+— while still *looking* correct, because the two explicit `return 1` guards in that function do
+trigger the trap. Do not "tidy" that flag away.
 
 Manual rollback to a known-good commit:
 

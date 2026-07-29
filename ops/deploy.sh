@@ -20,7 +20,16 @@
 #  No credentials live in this file. Everything secret is read from $ENV_FILE, which is created
 #  once, by hand, outside the repo (ops/README.md).
 # ============================================================================================
-set -euo pipefail
+#
+#  `-E` (errtrace) is load-bearing, not decoration. Without it the ERR trap installed below is
+#  NOT inherited by shell functions, and every real failure in this script happens inside
+#  `build_and_reload` — pnpm install, the build, prisma, rsync, pm2. Verified: with plain
+#  `set -euo pipefail`, a `false` inside a function exits the shell with status 1 and the ERR
+#  trap never runs, so the advertised automatic rollback silently does not happen. (The two
+#  explicit `return 1` guards inside `build_and_reload` did fire, because *those* make the
+#  function call itself the failing command at top level — which is exactly why the gap was
+#  easy to miss when testing the guards.)
+set -Eeuo pipefail
 
 usage() {
   cat <<'EOF'
@@ -177,17 +186,34 @@ build_and_reload() {
   log "building workspace"
   pnpm -r build
 
-  # Prisma is driven from apps/server, not from the repo root, even though the schema lives at
-  # the root. `prisma generate` has to resolve `@prisma/client` to know where to write the
-  # generated client, and under pnpm's strict layout that package is a dependency of
-  # apps/server only — it is not resolvable from the root, so the root `db:generate` script
-  # fails. (apps/server/src/lib/prisma.ts documents the same constraint from the other side.
-  # Adding @prisma/client to the root package.json would make the root script work; until then
-  # this is the form that actually runs.)
+  # `prisma generate` resolves `@prisma/client` by walking up from the directory that CONTAINS
+  # THE SCHEMA — not from the process cwd, and not from whichever workspace package invoked it.
+  # The schema lives at the repo root, and under pnpm's strict layout @prisma/client is a
+  # dependency of apps/server only, so from the root it is unresolvable and the CLI aborts with
+  # "Could not resolve @prisma/client" (or tries to `pnpm add` it, which is worse — it would
+  # mutate a tracked package.json mid-deploy). `--filter @crown/server` does not help: it
+  # changes the cwd, and the cwd is not what Prisma looks at. Both were verified.
+  #
+  # So point the generator at a symlink that lives inside apps/server, where the lookup starts
+  # in a node_modules tree that has @crown/server's dependencies. Recreated every run, so it is
+  # idempotent; untracked, so the `git reset --hard` above never disturbs it; dot-prefixed so
+  # Prisma's own schema auto-discovery (which looks for `schema.prisma` / `prisma/schema.prisma`)
+  # cannot pick it up by accident and start writing migrations into apps/server.
+  #
+  # The permanent fix is one line in the ROOT package.json — `"@prisma/client": "^5.22.0"` as a
+  # dependency — after which this link and `pnpm --filter` can both go and `prisma generate
+  # --schema "$SCHEMA"` works from anywhere. See docs/DEPLOY.md § Migrations.
+  local schema_link="$APP_DIR/apps/server/.prisma-schema.prisma"
+  ln -sfn "$SCHEMA" "$schema_link"
   log "generating prisma client"
-  pnpm --filter @crown/server exec prisma generate --schema "$SCHEMA"
+  pnpm --filter @crown/server exec prisma generate --schema "$schema_link"
 
   if [ "$RUN_MIGRATE" -eq 1 ]; then
+    # `migrate deploy` needs the REAL schema path, not the link: it looks for `migrations/` next
+    # to the schema it was given, and next to the link that would be apps/server/migrations,
+    # which does not exist. It also does not need @prisma/client (it never generates), so the
+    # root path is both necessary and sufficient here. Verified: with the root schema it reaches
+    # the database connection instead of failing on client resolution.
     log "applying database migrations"
     pnpm --filter @crown/server exec prisma migrate deploy --schema "$SCHEMA"
   else
@@ -199,7 +225,16 @@ build_and_reload() {
     return 1
   fi
 
-  local release="$RELEASES_DIR/$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
+  # The name is timestamp+sha, which collides when the SAME commit is published twice inside one
+  # second — and the rollback path does exactly that. `rsync --delete` into a colliding name
+  # would rewrite the directory `current` still points at, in place, which is the one thing the
+  # atomic symlink swap exists to prevent. Reproduced in a stubbed run; hence the suffix.
+  local base="$RELEASES_DIR/$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
+  local release="$base" n=1
+  while [ -e "$release" ]; do
+    release="$base.$n"
+    n=$((n + 1))
+  done
   log "publishing static bundle to $release"
   mkdir -p "$release"
   rsync -a --delete apps/web/dist/ "$release/"
@@ -219,9 +254,12 @@ rollback() {
   ROLLING_BACK=1
   warn "deploy failed — rolling back to $PREV_SHA"
 
-  # Every step here is guarded: the ERR trap is not inherited by functions, so an unguarded
-  # failure inside the rollback would exit the shell silently and leave the operator with no
-  # idea how far it got.
+  # Every step here is guarded with `|| warn`. This function runs FROM the ERR trap, and the
+  # trap is single-shot by way of $ROLLING_BACK — so a bare failure here would just exit the
+  # shell and leave the operator with no idea how far the rollback got. The `if ... && health`
+  # below is the other half of that: putting `build_and_reload` in a condition suspends errexit
+  # for its whole body, so the rollback always reaches the health check and reports honestly
+  # instead of dying at the first hiccup.
   if [ -n "$PREV_RELEASE" ] && [ -d "$PREV_RELEASE" ]; then
     log "restoring static release $PREV_RELEASE"
     point_current_at "$PREV_RELEASE" || warn "could not restore the static symlink"

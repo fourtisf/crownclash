@@ -19,11 +19,11 @@ ship it — without changing how the game looks or feels.
 | `packages/shared` — data, sim, AI, economy, validation | Implemented, with tests |
 | `apps/server` — Fastify API, auth, saves, server-side match validation | Implemented, with tests |
 | `apps/web` — client, ported screens, verbatim art/CSS/renderer | Implemented; typechecks and builds clean |
-| Phase 2 real-time PvP | **Scaffold only.** The `/ws` route accepts sockets and matchmaking pairs players; the authoritative game loop is not implemented and a `deploy` message is answered with `pvp_not_enabled`. |
-| Ops (PM2, nginx, deploy script, CI) | Configs committed and reviewed |
+| Phase 2 real-time PvP | **Scaffold only, and server-side only.** `/ws` accepts authenticated sockets and pairs players by trophies; the authoritative game loop is not implemented and a `deploy` message is answered with `pvp_not_enabled`. **The client never opens the socket** — nothing in `apps/web/src` references `/ws`. |
+| Ops (PM2, nginx, deploy script, CI) | Written and reviewed. Never executed against a server; the review that hardened them is the only thing they have been through. |
 | Deployed to a VPS | **No.** Nothing here has run on a server. See [Deploying](#deploying). |
 | `prisma/migrations/` | **Not created yet.** `prisma/schema.prisma` is committed; the initial migration is not. See [`docs/DEPLOY.md`](docs/DEPLOY.md) § Migrations. |
-| Running the *compiled* server under plain Node | **Yes.** `pnpm build` emits `packages/shared/dist` and `apps/server/dist`, and `node apps/server/dist/src/index.js` boots and listens — which is what PM2 runs. Verified locally; still never run on a VPS. |
+| Running the *compiled* server under plain Node | **Yes.** `pnpm build` emits `packages/shared/dist` and `apps/server/dist`, and `node apps/server/dist/src/index.js` — the exact file PM2 runs — boots and answers `/api/health` with `"env":"production"`. Verified locally with real `AUTH_SECRET`/`COOKIE_SECRET`; still never run on a VPS. |
 
 ---
 
@@ -43,9 +43,10 @@ the client is same-origin with the server in development exactly as it is in pro
 CORS and the SIWE domain binding all behave the same in both.
 
 Postgres is the only hard dependency: the API expects
-`postgresql://crown:crown@localhost:5432/crown` unless `DATABASE_URL` says otherwise. Redis is
-optional locally — `apps/server/src/lib/redis.ts` falls back to an in-process implementation of
-the handful of commands the server uses, and `/api/health` tells you which one you got.
+`postgresql://crown:crown@localhost:5432/crown?schema=public` unless `DATABASE_URL` says
+otherwise. Redis is optional locally — `apps/server/src/lib/redis.ts` falls back to an in-process
+implementation of the handful of commands the server uses, and `/api/health` tells you which one
+you got.
 
 `apps/web/vite.config.ts` binds the dev server on all interfaces, so a real phone on the same wifi
 can open it. Do that early; a desktop emulator does not reproduce touch latency or the safe-area
@@ -161,23 +162,32 @@ pnpm extract:check
 ```
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs, in order: install with a frozen
-lockfile → `extract:check` → typecheck → test → build. Playwright is deliberately not in that
-workflow; it needs browsers and a live server.
+lockfile → `extract:check` → typecheck → test → build → assert that PM2's entrypoints exist on
+disk and that the ops shell scripts parse. That last step exists because the deploy configuration
+is the only thing here that nothing imports, typechecks or tests: a tsconfig change that moves the
+build output leaves every other gate green and only shows up as a crash-looping PM2 app.
+Playwright is deliberately not in this workflow; it needs browsers and a live server.
 
 ---
 
 ## Deploying
 
-**This has not been done.** There are no VPS credentials, no domain and no database anywhere in
-this repository's history — the deployment configuration is written and reviewed, and that is all.
+**This has not been done.** No VPS, no domain, no database, no credentials — the only secrets in
+the tree are the `dev-only-…` placeholders in `.env.example`, which the API refuses to start with
+in production. The deployment configuration below is written and reviewed, and that is all it is.
 
-What is committed:
+Nothing here has run on a server. `apps/server/test/load.test.ts` measures match-validation p95
+in a single Node process on a developer machine, which bounds the CPU cost of the expensive
+endpoint and nothing else — it is not a load test of the deployment, and no request has ever
+crossed nginx, Cloudflare or PM2.
+
+What is in the repo:
 
 | File | What it is |
 |---|---|
 | [`ecosystem.config.js`](ecosystem.config.js) | PM2: `crown-api` (cluster) and `crown-worker` (fork), memory limits, graceful reload, log paths |
 | [`ops/nginx/crown-clash.conf`](ops/nginx/crown-clash.conf) | Reverse proxy, SPA static serving, Cloudflare real-IP, `/ws` upgrade, caching, CSP |
-| [`ops/deploy.sh`](ops/deploy.sh) | Idempotent deploy: pull → install → build → migrate → atomic static swap → zero-downtime reload → health check → automatic rollback |
+| [`ops/deploy.sh`](ops/deploy.sh) | Idempotent deploy: pull → install → build → migrate → atomic static swap → zero-downtime reload → health check → automatic rollback. Its control flow (rollback on build failure, on health failure, release naming, pruning, the lock) was exercised against stubbed `git`/`pnpm`/`pm2`/`curl`; the real `pm2` and `nginx` halves are unexercised. |
 | [`ops/README.md`](ops/README.md) | First-time VPS build-out: Node, pnpm, Postgres, Redis, nginx, certs, PM2 boot persistence, firewall |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | The runbook: env vars, Cloudflare settings, migrations, rollback, monitoring, triage |
 
@@ -187,15 +197,22 @@ What a human has to do, in order:
    image to a box `deploy.sh` can target.
 2. Create the initial Prisma migration and commit it (`docs/DEPLOY.md` § Migrations). The deploy
    script refuses to run without it.
-3. Put the real hostname into `ops/nginx/crown-clash.conf` (three `server_name` lines) and commit.
+3. Put the real hostname into `ops/nginx/crown-clash.conf` — two `server_name` lines, one per
+   `server` block — and commit it. `ops/deploy.sh` runs `git reset --hard` on the VPS checkout,
+   so anything edited in place there is reverted on the next deploy.
 4. Generate `AUTH_SECRET` and `COOKIE_SECRET` into `/etc/crown-clash/app.env`. The API refuses to
    boot in production while they are still the dev placeholders.
 5. Point DNS at Cloudflare, proxied, SSL/TLS mode **Full (strict)**, with a Cloudflare Origin CA
    certificate on the box.
 6. Run `ops/deploy.sh`, then walk the [`docs/DEPLOY.md`](docs/DEPLOY.md) pre-flight list.
 
-The pre-flight list is not ceremony — it checks things that are known to be unsettled, including
-whether the compiled server can import `@crown/shared` under plain Node.
+The pre-flight list is not ceremony. Every item on it is something CI structurally cannot catch —
+starting with whether the compiled server boots under plain Node, which is the one code path that
+`pnpm dev`, `vitest` and `tsc` all resolve differently from the way PM2 will.
+
+One thing `deploy.sh` cannot do for you: `prisma generate` only resolves `@prisma/client` from
+inside `apps/server`, so the script generates against a symlink it creates there. The permanent
+one-line fix is in [`docs/DEPLOY.md`](docs/DEPLOY.md) § Migrations.
 
 ---
 
@@ -207,14 +224,18 @@ airdrop-eligibility marking, server-owned saves with a one-time migration from a
 server-validated matches by seeded replay, server-issued chest rolls, a trophy leaderboard, and
 rate limits on the endpoints that matter.
 
-**Phase 2 — real-time PvP. Scaffolded, not built.** `apps/server/src/ws.ts` accepts authenticated
-socket upgrades and runs Redis-backed matchmaking that widens ±50 → ±200 over ten seconds and then
-falls back to the vs-AI path — with the prototype's existing matchmaking modal, so nothing visible
-changes. What is missing is the authoritative loop: the server ticking the sim at 30 Hz, applying
-deploy intents at tick boundaries, and broadcasting snapshots at 10 Hz. nginx already proxies `/ws`
-with the upgrade headers and a long read timeout. One caveat is written down in
-[`docs/DEPLOY.md`](docs/DEPLOY.md): rooms currently live in a per-process map, so PvP needs either
-Redis-backed rooms or a single API instance.
+**Phase 2 — real-time PvP. Scaffolded on the server, absent from the client.**
+`apps/server/src/ws.ts` accepts authenticated socket upgrades and runs Redis-backed matchmaking
+that widens ±50 → ±200 over ten seconds and then tells the client to fall back to the vs-AI path.
+Nothing in `apps/web/src` opens that socket today: Phase 1 goes straight from the prototype's
+matchmaking modal into a local match, so the fallback path is a server-side design decision, not
+a shipped behaviour. What is missing on the server is the authoritative loop — ticking the sim at
+30 Hz, applying deploy intents at tick boundaries, broadcasting snapshots at 10 Hz — and on the
+client, everything. nginx already proxies `/ws` with the upgrade headers and a long read timeout,
+so no infrastructure change is needed. Two caveats are written down in
+[`docs/DEPLOY.md`](docs/DEPLOY.md): rooms live in a per-process map, so PvP needs either
+Redis-backed rooms or `CROWN_API_INSTANCES=1`; and Cloudflare's Network → WebSockets toggle has
+to be on.
 
 **Phase 3 — scaffold only, do not build.** $CROWN claim hooks, seasonal leaderboard resets, clans.
 

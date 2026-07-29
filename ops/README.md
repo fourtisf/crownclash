@@ -145,7 +145,18 @@ forgot.
 ```bash
 sudo mkdir -p /srv/crown-clash /var/www/crown-clash/releases /var/log/crown-clash /etc/crown-clash /etc/ssl/crown-clash
 sudo chown -R deploy:deploy /srv/crown-clash /var/www/crown-clash /var/log/crown-clash
-sudo chmod 750 /etc/crown-clash /etc/ssl/crown-clash
+
+# /etc/crown-clash must be root-owned but GROUP deploy, and 750. The group half is not
+# cosmetic: `deploy` is the user that runs ops/deploy.sh and pm2, and with the directory left
+# root:root 750 it cannot traverse into it — so the 0640 root:deploy app.env inside is
+# unreadable no matter what its own mode says. That failure is quiet (Node's existsSync reports
+# a permission error as "does not exist"), which is exactly why it is spelled out here.
+sudo chown root:deploy /etc/crown-clash
+sudo chmod 750 /etc/crown-clash
+
+# /etc/ssl/crown-clash stays root:root — only nginx's master process, which runs as root,
+# ever reads it. The app user has no business in there.
+sudo chmod 750 /etc/ssl/crown-clash
 
 sudo -u deploy git clone https://github.com/<org>/crown-clash.git /srv/crown-clash
 ```
@@ -254,20 +265,27 @@ sudo ln -sf /etc/nginx/sites-available/crown-clash.conf            /etc/nginx/si
 sudo rm -f /etc/nginx/sites-enabled/default
 ```
 
-Replace `crownclash.example.com` in `ops/nginx/crown-clash.conf` with the real hostname (three
-`server_name` lines) and commit that change — the file is version-controlled.
+Replace `crownclash.example.com` in `ops/nginx/crown-clash.conf` with the real hostname — two
+`server_name` lines, one per `server` block, each naming both the apex and `www` — and commit
+that change, because the file is version-controlled and `ops/deploy.sh` runs `git reset --hard`
+on this checkout.
 
 ```bash
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-`nginx -t` fails until `/var/www/crown-clash/current` exists, so run the first deploy (§11)
-before expecting a clean reload.
+`nginx -t` reads the config and the files it references, so it fails if the two snippets above
+are not symlinked or if `/etc/ssl/crown-clash/origin.{pem,key}` are missing. It does **not**
+check `root`, so a missing `/var/www/crown-clash/current` passes the test and then produces 404s
+at runtime — do the first deploy (§11) before pointing DNS at the box.
 
-Refresh Cloudflare's IP ranges when they change (quarterly is plenty):
+Refresh Cloudflare's IP ranges when they change (quarterly is plenty). The script rewrites a
+version-controlled file, so **commit the result** — otherwise the next `ops/deploy.sh` reverts
+it and real client IPs silently collapse back to Cloudflare PoP addresses:
 
 ```bash
 sudo /srv/crown-clash/ops/nginx/refresh-cloudflare-ips.sh
+git -C /srv/crown-clash diff --stat ops/nginx/cloudflare-realip.conf   # commit if non-empty
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -355,6 +373,13 @@ release directory and swap `current` → `pm2 startOrReload --env production` �
 
 It will refuse to start if `prisma/migrations/` is not committed. See
 [`docs/DEPLOY.md`](../docs/DEPLOY.md) § Migrations.
+
+One artefact it leaves behind is expected: `apps/server/.prisma-schema.prisma`, an untracked
+symlink to the root schema. `prisma generate` resolves `@prisma/client` by walking up from the
+directory holding the schema, and `@prisma/client` is a dependency of `apps/server` only, so
+generating against the root path fails outright. The link makes the lookup start somewhere it can
+succeed. Deleting it is harmless — the next deploy recreates it — and it becomes unnecessary the
+day `@prisma/client` is added to the root `package.json`.
 
 Then:
 

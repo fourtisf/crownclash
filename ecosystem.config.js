@@ -37,16 +37,25 @@ const SERVER_DIR = join(ROOT, 'apps', 'server');
 
 const ENV_FILE = process.env.CROWN_ENV_FILE || '/etc/crown-clash/app.env';
 const LOG_DIR = process.env.CROWN_LOG_DIR || '/var/log/crown-clash';
-const API_INSTANCES = Number(process.env.CROWN_API_INSTANCES || 2);
+
+// A non-numeric CROWN_API_INSTANCES would otherwise reach PM2 as NaN, and PM2 reads a
+// non-positive instance count as "one worker per CPU" — silently the opposite of a typo's
+// intent on a shared box. Refuse instead of guessing.
+const rawInstances = process.env.CROWN_API_INSTANCES;
+const API_INSTANCES = rawInstances ? Number(rawInstances) : 2;
+if (!Number.isInteger(API_INSTANCES) || API_INSTANCES < 1) {
+  throw new Error(`ecosystem.config.js: CROWN_API_INSTANCES must be a positive integer, got '${rawInstances}'`);
+}
 
 /**
  * Resolve a compiled server entrypoint.
  *
- * `apps/server/tsconfig.json` sets `rootDir: "."` (not `"src"`), so `tsc` mirrors the source
- * tree under `outDir` and the real entrypoints are `dist/src/index.js` / `dist/src/worker.js` —
- * *not* `dist/index.js`. Verified by building: `tsc -p apps/server/tsconfig.json` emits
- * `dist/src/index.js` and `dist/src/worker.js`. (`apps/server/package.json`'s `start` script
- * still says `node dist/index.js`; it is wrong today for the same reason.)
+ * `apps/server/tsconfig.json` sets `rootDir: "."` (not `"src"`), and `tsconfig.build.json` keeps
+ * that setting while narrowing the inputs to `src/`, so `tsc` mirrors the source tree under
+ * `outDir` and the real entrypoints are `dist/src/index.js` / `dist/src/worker.js` — *not*
+ * `dist/index.js`. Verified by building. `apps/server/package.json`'s `start` / `worker` scripts
+ * agree (`node dist/src/index.js`); PM2 does not use them, but a disagreement there is the first
+ * sign this layout has moved.
  *
  * Both layouts are probed rather than hardcoded so that tightening that tsconfig to
  * `rootDir: "src"` later does not turn the next deploy into a "script not found" outage.
@@ -68,12 +77,26 @@ function serverEntry(basename) {
  * `pm2 resurrect`, and an environment that only existed inside a deploy shell would be gone by
  * then. Reading the file makes a reboot and a deploy produce the same environment.
  *
- * Absent file ⇒ empty object, so this config also loads on a dev machine.
+ * Absent file ⇒ empty object, so this config also loads on a dev machine. Anything OTHER than
+ * "absent" is fatal, and deliberately so: `existsSync` reports false for a file that exists but
+ * cannot be read, which is the exact shape of the most likely production mistake — 0640
+ * root:deploy on `app.env` inside a directory the `deploy` user cannot traverse. Swallowing that
+ * would hand PM2 an empty environment and surface three steps later as the misleading
+ * "AUTH_SECRET is still the dev default". Fail here, where the cause is still visible.
  */
 function readEnvFile(file) {
-  if (!existsSync(file)) return {};
+  let contents;
+  try {
+    contents = readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return {};
+    throw new Error(
+      `ecosystem.config.js: ${file} exists but could not be read (${err && err.code}). ` +
+        'It must be readable by the user running pm2 — see ops/README.md §6.',
+    );
+  }
   const out = {};
-  for (const raw of readFileSync(file, 'utf8').split('\n')) {
+  for (const raw of contents.split('\n')) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
     const eq = line.indexOf('=');

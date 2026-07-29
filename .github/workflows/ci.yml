@@ -73,3 +73,28 @@ jobs:
 
       - name: Build (shared, server, web)
         run: pnpm -r build
+
+      # The deploy configuration is the only part of this repo that nothing else exercises: it
+      # is not imported, not typechecked and not tested, and its failure mode is a crash-looping
+      # PM2 app on a live box. Two cheap assertions close the gap.
+      #
+      # 1. ecosystem.config.js resolves crown-api/crown-worker by probing dist/src/*.js then
+      #    dist/*.js, because apps/server/tsconfig.json sets `rootDir: "."`. Tightening that to
+      #    `rootDir: "src"` would relocate the output and break the deploy while leaving
+      #    typecheck, test and build all green. Must run AFTER the build — the probe checks disk.
+      # 2. `bash -n` parses the deploy scripts. A syntax error in ops/deploy.sh is otherwise
+      #    discovered halfway through a production release.
+      - name: PM2 entrypoints resolve and ops scripts parse
+        run: |
+          node -e "
+            const { existsSync } = require('node:fs');
+            const { apps } = require('./ecosystem.config.js');
+            const missing = apps.filter((a) => !existsSync(a.script));
+            for (const a of apps) console.log((existsSync(a.script) ? 'ok   ' : 'MISS ') + a.name + ' -> ' + a.script);
+            if (missing.length) {
+              console.error('PM2 entrypoint(s) missing after a full build — see docs/DEPLOY.md check 3');
+              process.exit(1);
+            }
+          "
+          bash -n ops/deploy.sh
+          bash -n ops/nginx/refresh-cloudflare-ips.sh

@@ -30,6 +30,7 @@ const profileSchema = z
     sfx: z.boolean().optional(),
     deck: z.array(z.string()).length(8).optional(),
     seen: z.boolean().optional(),
+    tutorialDone: z.boolean().optional(),
   })
   .refine(
     (v) =>
@@ -37,7 +38,8 @@ const profileSchema = z
       v.avatar !== undefined ||
       v.sfx !== undefined ||
       v.deck !== undefined ||
-      v.seen !== undefined,
+      v.seen !== undefined ||
+      v.tutorialDone !== undefined,
     { message: 'no fields to update' },
   );
 
@@ -134,6 +136,9 @@ export async function saveRoutes(app: FastifyInstance): Promise<void> {
         // One-way: the first-run explainer can be dismissed but not un-dismissed, so a stale
         // client cannot make it reappear for someone who has already played.
         if (body.seen === true) save.seen = true;
+      // Also one-way, for the same reason: a stale client must not be able to make a player
+      // who has already played sit through the coach marks again.
+      if (body.tutorialDone === true) save.tutorialDone = true;
         if (body.deck !== undefined) {
           // Re-validated on every attempt: a retry runs against a freshly-read save, and a deck
           // is only legal relative to the cards that save owns.

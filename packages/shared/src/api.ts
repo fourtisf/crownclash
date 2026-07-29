@@ -76,6 +76,8 @@ export interface ProfileUpdateRequest {
   deck?: string[];
   /** First-run explainer dismissed. The prototype persisted this on `S` (L2995). */
   seen?: boolean;
+  /** First-match coach marks finished or skipped. One-way: it can only be set true. */
+  tutorialDone?: boolean;
 }
 
 /* --------------------------------------------------------------------- match */
@@ -98,6 +100,19 @@ export interface MatchStartResponse {
 export interface MatchFinishRequest {
   matchId: string;
   deployLog: DeployLogEntry[];
+  /**
+   * The player gave up rather than playing to the whistle.
+   *
+   * Trusting this costs nothing: conceding can only ever *lose* trophies, so there is no
+   * incentive to claim it falsely. The log is still validated exactly as normal — conceding
+   * is not an escape hatch from a tampered log.
+   */
+  conceded?: boolean;
+  /**
+   * Tick the player gave up on. The server simulates the log only up to here, so the crowns
+   * shown on the result screen are the ones that were actually on the board at that moment.
+   */
+  concededAtTick?: number;
 }
 
 export interface MatchFinishResponse {

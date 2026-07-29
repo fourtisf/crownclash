@@ -34,15 +34,19 @@ function go(id: string): void {
  * queue it: the match was real, and a dropped connection at the final whistle should not cost
  * someone their trophies.
  */
-async function finishMatch(matchId: string, deployLog: DeployLogEntry[]): Promise<void> {
+async function finishMatch(
+  matchId: string,
+  deployLog: DeployLogEntry[],
+  opts: { conceded?: boolean; concededAtTick?: number } = {},
+): Promise<void> {
   try {
-    const res = await api.matchFinish({ matchId, deployLog });
+    const res = await api.matchFinish({ matchId, deployLog, ...opts });
     setSave(res.save);
     markDots();
     showResult(res, { onHome: () => { go('home'); setTab('home'); }, onAgain: () => void findMatch(startBattle) });
   } catch (err) {
     if (err instanceof ApiFailure && (err.isOffline || err.status >= 500)) {
-      await queueIntent('match', { matchId, deployLog });
+      await queueIntent('match', { matchId, deployLog, ...opts });
       toastTop('Offline — result will sync when you reconnect');
     } else {
       toastTop('Match could not be verified');
@@ -56,7 +60,12 @@ async function finishMatch(matchId: string, deployLog: DeployLogEntry[]): Promis
 async function flushQueue(): Promise<void> {
   const sent = await drainQueue(async (intent) => {
     if (intent.kind === 'match') {
-      const p = intent.payload as { matchId: string; deployLog: DeployLogEntry[] };
+      const p = intent.payload as {
+        matchId: string;
+        deployLog: DeployLogEntry[];
+        conceded?: boolean;
+        concededAtTick?: number;
+      };
       const res = await api.matchFinish(p);
       setSave(res.save);
     } else if (intent.kind === 'profile') {
@@ -89,7 +98,13 @@ function welcome(): void {
 
 async function init(): Promise<void> {
   bindModals();
-  initBattle({ onFinish: (id, log) => void finishMatch(id, log), go });
+  initBattle({
+    onFinish: (id, log, opts) => void finishMatch(id, log, opts),
+    // Fire-and-forget: seeing the walkthrough is not worth blocking on, and if the write is
+    // lost the worst case is one extra viewing.
+    onTutorialDone: () => void api.updateProfile({ tutorialDone: true }).catch(() => undefined),
+    go,
+  });
 
   // The `#homeBody` (BATTLE) and `#navbar` delegates live in screens/home.ts and ui/tabs.ts,
   // each bound once behind its own guard. main.ts used to bind its own copies too, which meant

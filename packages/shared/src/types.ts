@@ -145,6 +145,13 @@ export interface SaveState {
   stats: { depl: number; dmg: number; crown: number; elix: number; chests: number };
   sfx: boolean;
   seen: boolean;
+  /**
+   * First-match coach marks have been completed or skipped.
+   *
+   * Deliberately its own flag rather than deriving from `wins + losses === 0`: a draw
+   * increments neither counter (L2943-2944), so a drawn first match would replay the tutorial.
+   */
+  tutorialDone: boolean;
 }
 
 /* ------------------------------------------------------------------ simulation */

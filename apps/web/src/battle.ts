@@ -25,6 +25,8 @@ import type { RenderFacade } from './engine';
 import { Fx } from './fx';
 import { S } from './api/store';
 import { setToast } from './ui/toast';
+import { startTutorial, stopTutorial } from './screens/tutorial';
+import { closeModal, lockModal, openModal } from './ui/modal';
 
 /** The live battle, or null when we are not in one. Mirrors the prototype's `B` global. */
 export let B: BattleView | null = null;
@@ -68,8 +70,17 @@ const scratchX: number[] = [];
 const scratchY: number[] = [];
 
 export interface BattleCallbacks {
-  /** Called once the match ends, with the log the server must re-simulate. */
-  onFinish(matchId: string, deployLog: DeployLogEntry[]): void;
+  /**
+   * Called once the match ends, with the log the server must re-simulate.
+   * `conceded` marks a give-up: the server still validates the log, then forces a loss.
+   */
+  onFinish(
+    matchId: string,
+    deployLog: DeployLogEntry[],
+    opts?: { conceded?: boolean; concededAtTick?: number },
+  ): void;
+  /** Called when the first-match walkthrough is finished or skipped. */
+  onTutorialDone?(): void;
   /** Screen switch, so battle.ts does not need to know about the tab system. */
   go(screen: string): void;
 }
@@ -160,17 +171,77 @@ export function startBattle(start: MatchStartResponse): void {
     if (B) sizeArena();
   }, 260);
 
+  const gu = $('#giveUp');
+  if (gu) gu.hidden = false;
+
   lastT = performance.now();
   acc = 0;
   lastSec = -1;
   cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(loop);
+
+  // First match ever: walk them through it. Started after the loop so step 1 can watch elixir
+  // actually climbing rather than sitting at its opening 5.
+  if (!S.tutorialDone) {
+    startTutorial(
+      {
+        elixir: () => (B ? B.sim.state.elix[0] : 0),
+        selected: () => !!B && B.selected >= 0,
+        deployed: () => (B ? B.deployLog.length : 0),
+      },
+      () => cb?.onTutorialDone?.(),
+    );
+  }
 }
 
 export function stopBattle(): void {
   cancelAnimationFrame(rafId);
   rafId = 0;
+  stopTutorial();
+  const gu = $('#giveUp');
+  if (gu) gu.hidden = true;
   B = null;
+}
+
+/**
+ * Give up.
+ *
+ * Confirmed first, because an accidental concession costs the player ~22 trophies and there
+ * is no undo. Submits the log exactly as a finished match would; the server re-validates it
+ * and applies a loss (see routes/match.ts).
+ */
+function confirmGiveUp(): void {
+  if (!B || B.over || B.submitted) return;
+  lockModal(true);
+  openModal(
+    '<h2 class="goldtext">GIVE UP?</h2>' +
+      '<p class="sub">You will lose this match and the trophies that come with it.</p>' +
+      '<div style="display:flex;gap:8px;margin-top:16px">' +
+      '<button class="btn ghost" id="guNo" style="flex:1">KEEP PLAYING</button>' +
+      '<button class="btn" id="guYes" style="flex:1;background:linear-gradient(180deg,#ff8a8a,var(--red) 45%,var(--red-d))">GIVE UP</button>' +
+      '</div>',
+  );
+  const no = $('#guNo');
+  if (no) no.onclick = () => { lockModal(false); closeModal(); };
+  const yes = $('#guYes');
+  if (yes) {
+    yes.onclick = () => {
+      lockModal(false);
+      closeModal();
+      if (!B || B.submitted) return;
+      B.submitted = true;
+      const atTick = B.sim.state.tick;
+      const matchId = B.matchId;
+      const log = B.deployLog.slice();
+      // Stop simulating immediately: the player has left, and any further ticks would be
+      // simulated locally but never sent, so the screen would drift from what the server sees.
+      B.over = true;
+      stopTutorial();
+      setToast('DEFEAT');
+      Snd.lose();
+      cb?.onFinish(matchId, log, { conceded: true, concededAtTick: atTick });
+    };
+  }
 }
 
 /** L1653-1662 — fit the arena to its wrapper, retrying while the layout is still settling. */
@@ -286,6 +357,9 @@ function bindBattleInput(): void {
 
   const row = must('#handRow');
   const wrap = must('#arenaWrap');
+
+  const giveUp = $('#giveUp');
+  if (giveUp) giveUp.onclick = () => confirmGiveUp();
 
   row.addEventListener('pointerdown', (e) => {
     const target = e.target as HTMLElement | null;

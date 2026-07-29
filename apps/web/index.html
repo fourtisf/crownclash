@@ -14,6 +14,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Baloo+2:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/src/styles.css">
+<!-- UI added by the port. Separate file so styles.css stays a verbatim slice. -->
+<link rel="stylesheet" href="/src/ui.css">
 </head>
 <body>
 <div id="app">
@@ -153,8 +155,13 @@
     </div>
     <div id="arenaWrap">
       <canvas id="arena"></canvas>
+      <button id="giveUp" title="Give up" aria-label="Give up this match">🏳️</button>
       <div class="toast goldtext" id="bToast"></div>
       <div class="fx-flash" id="bFlash"></div>
+      <div class="coach" id="coach" role="status" aria-live="polite">
+        <div class="ct"><span class="cstep" id="coachStep"></span><span id="coachText"></span></div>
+        <button class="cskip" id="coachSkip">SKIP</button>
+      </div>
     </div>
     <div class="handbar">
       <div class="elixbar" id="elixBar"><span class="x2" id="elixX2"></span><span class="elixnum" id="elixNum">5</span></div>

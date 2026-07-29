@@ -24,7 +24,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   AI_AVATARS, AI_DECKS, AI_NAMES, API_ERRORS, Rng, aiDeckIndexFor, aiLevelFor, aiUpdate, applyMatchRewards,
-  arenaFor, deckLevels, randomSeed, runMatch, validateDeployLog,
+  arenaFor, deckLevels, randomSeed, runMatch, validateDeployLog, MATCH_SECONDS, OVERTIME_SECONDS, TICK_HZ,
   type DeployLogEntry, type MatchFinishResponse, type MatchRewards, type MatchStartResponse, type SimConfig,
 } from '@crown/shared';
 import { requireUser } from '../lib/auth.js';
@@ -33,6 +33,9 @@ import { LIMITS, limit } from '../lib/ratelimit.js';
 import { loadSave, mutateSave, repairSave } from '../lib/saves.js';
 import { RKEY } from '../lib/redis.js';
 import type { MatchRow, Store, UserRow } from '../lib/store.js';
+
+/** Hard ceiling for a concede tick: regulation + sudden death. */
+const MAX_MATCH_TICKS = (MATCH_SECONDS + OVERTIME_SECONDS) * TICK_HZ;
 
 const finishSchema = z.object({
   matchId: z.string().min(1).max(64),
@@ -44,6 +47,8 @@ const finishSchema = z.object({
       y: z.number().finite(),
     }),
   ),
+  conceded: z.boolean().optional(),
+  concededAtTick: z.number().int().min(0).max(1_000_000).optional(),
 });
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -181,13 +186,25 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
       const structural = validateDeployLog(deployLog, cfg.myDeck);
       if (!structural.ok) return voided(`log:${structural.reason}`);
 
+      // A concession still replays the log in full — giving up is not a way to launder a
+      // tampered log. The only thing it changes is where the simulation stops and what the
+      // outcome is: the player asked to lose, so they lose, and the crowns reported are the
+      // ones that were actually on the board when they quit.
+      //
+      // Trusting `conceded` costs nothing, because it can only ever *reduce* the reward.
+      const lastLogTick = deployLog.length ? deployLog[deployLog.length - 1].t : 0;
+      const concedeTick = body.conceded
+        ? Math.max(lastLogTick + 1, Math.min(body.concededAtTick ?? 0, MAX_MATCH_TICKS))
+        : undefined;
+
       // Stage 2: the authoritative replay. `runMatch` returns `illegal` the moment a logged
       // deploy is not playable at that tick — not enough elixir, wrong half, card not in hand.
-      const { sim, illegal } = runMatch(cfg, deployLog, aiUpdate);
+      const { sim, illegal } = runMatch(cfg, deployLog, aiUpdate, concedeTick ? { maxTicks: concedeTick } : {});
       if (illegal) return voided(`sim:${illegal.reason}`);
-      if (!sim.state.over || !sim.state.endResult) return voided('sim:did-not-terminate');
+      // A conceded match is expected to stop mid-play, so `over` is only required otherwise.
+      if (!body.conceded && (!sim.state.over || !sim.state.endResult)) return voided('sim:did-not-terminate');
 
-      const result = sim.state.endResult;
+      const result = body.conceded ? 'lose' : sim.state.endResult!;
       const crowns: [number, number] = [sim.state.crowns[0], sim.state.crowns[1]];
       const hash = sim.hash();
 

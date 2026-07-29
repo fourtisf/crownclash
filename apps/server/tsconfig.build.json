@@ -1,10 +1,14 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    // rootDir "." in tsconfig.json is what makes `tsc` emit dist/src/*, and it is there so
-    // typecheck also covers test/. The production build must not ship the test suite, so it
-    // narrows the input to src/ while keeping the same output layout the PM2 config expects.
-    "rootDir": "."
+    // rootDir "." keeps the emitted layout at dist/src/*, which is what ecosystem.config.js
+    // and the package scripts point at.
+    "rootDir": ".",
+    "noEmit": false,
+    // Cleared on purpose: typecheck resolves @crown/shared to source so it works on a clean
+    // checkout, but the *build* must resolve it through the package's exports to the compiled
+    // dist. pnpm -r builds in topological order, so shared is always built first.
+    "paths": {}
   },
   "include": ["src/**/*.ts"]
 }

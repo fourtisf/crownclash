@@ -40,5 +40,7 @@ export const SERVER_ERRORS = {
   invalidProfile: 'invalid_profile',
   unknownShopItem: 'unknown_shop_item',
   unsupportedChestSource: 'unsupported_chest_source',
+  /** The save was written by another in-flight request; the client may retry verbatim. */
+  saveConflict: 'save_conflict',
   internal: 'internal_error',
 } as const;

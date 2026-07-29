@@ -23,7 +23,7 @@ import { HttpError, SERVER_ERRORS, sendError } from './lib/errors.js';
 import { loggerOptions } from './lib/logger.js';
 import { createRedis, type RedisBridge } from './lib/redis.js';
 import { PrismaStore } from './lib/store-prisma.js';
-import type { Store } from './lib/store.js';
+import { SaveConflictError, type Store } from './lib/store.js';
 import { authRoutes } from './routes/auth.js';
 import { economyRoutes } from './routes/economy.js';
 import { leaderboardRoutes } from './routes/leaderboard.js';
@@ -76,6 +76,19 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       // Shared across PM2 instances when Redis is real; per-process otherwise (see redis.ts).
       redis: redis.raw ?? undefined,
       keyGenerator: (req: FastifyRequest) => req.userId ?? req.ip,
+      // Fail OPEN when the limiter's own store is unreachable. @fastify/rate-limit defaults
+      // this to false, which means a store error propagates as a 500 — and because the ioredis
+      // client is deliberately configured `enableOfflineQueue: false`, every command during a
+      // reconnect errors instantly. Left at the default, a few seconds of Redis unavailability
+      // turns *every* rate-limited route (login, match start, match finish, chests, saves) into
+      // a 500 and takes the whole game down.
+      //
+      // Rate limits are abuse control, not the anti-cheat boundary: results still come from the
+      // server's own re-simulation and currency still moves only through validated actions, all
+      // of which live in Postgres. Losing the limits for the length of a Redis outage costs
+      // abuse resistance; refusing every request costs the service. The redis `error` handler in
+      // redis.ts logs the cause, and /api/health reports the live connection state.
+      skipOnError: true,
       // `statusCode` is part of the shape @fastify/rate-limit expects; the rest is our
       // `ApiError` so the client sees one error format everywhere.
       errorResponseBuilder: (_req, context): ApiError & { statusCode: number } => ({
@@ -89,6 +102,14 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
 
   app.setErrorHandler((err: FastifyError, req, reply) => {
     if (err instanceof HttpError) return sendError(reply, err);
+    // A save write that lost its compare-and-set four times running (see `mutateSave`). That is
+    // a live conflict on one player's save, not a server fault, and the client can simply retry
+    // — so it must not be reported as a 500.
+    if (err instanceof SaveConflictError) {
+      return reply
+        .status(409)
+        .send({ error: SERVER_ERRORS.saveConflict, message: 'save changed concurrently; retry' } satisfies ApiError);
+    }
     // @fastify/rate-limit *throws* its response body once a custom error handler exists, so
     // without this branch every 429 would be reported to the client as a 500 and no client
     // could back off correctly.
@@ -115,6 +136,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     ok: true,
     env: env.NODE_ENV,
     redis: redis.isFallback ? 'memory' : 'redis',
+    // `redis` above says which implementation was *configured*; this says whether it is
+    // actually connected. Without it a Redis that is configured but down looks identical to a
+    // healthy one, while rate limiting silently degrades (`skipOnError` above).
+    redisStatus: redis.raw ? redis.raw.status : 'memory-fallback',
     uptime: Math.round(process.uptime()),
   }));
 

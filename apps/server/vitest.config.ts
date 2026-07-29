@@ -1,6 +1,11 @@
 import { defineConfig } from 'vitest/config';
+import { resolve } from 'node:path';
 
 export default defineConfig({
+  resolve: {
+    // Point at the source so `pnpm test` works on a clean checkout, before anything is built.
+    alias: { '@crown/shared': resolve(__dirname, '../../packages/shared/src/index.ts') },
+  },
   test: {
     include: ['test/**/*.test.ts'],
     // The load test runs 200 full 180-second match re-simulations; the default 5 s timeout is

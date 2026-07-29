@@ -16,7 +16,9 @@ import { sanitizeSave, type SaveResponse } from '@crown/shared';
 import { requireUser } from '../lib/auth.js';
 import { SERVER_ERRORS, badRequest, conflict, unauthorized } from '../lib/errors.js';
 import { LIMITS, limit } from '../lib/ratelimit.js';
-import { PROFILE_AVATARS, ensurePlayableDeck, hasProgress, loadSave, persistSave, validateDeck } from '../lib/saves.js';
+import {
+  PROFILE_AVATARS, ensurePlayableDeck, hasProgress, loadSave, mutateSave, persistSave, repairSave, validateDeck,
+} from '../lib/saves.js';
 import type { Store, UserRow } from '../lib/store.js';
 
 const migrateSchema = z.object({ save: z.unknown() });
@@ -112,30 +114,34 @@ export async function saveRoutes(app: FastifyInstance): Promise<void> {
     async (req): Promise<SaveResponse> => {
       const body = parse(profileSchema, req.body);
       const user = await requireUserRow(store, req);
-      const { save } = await loadSave(store, user);
 
-      if (body.name !== undefined) {
-        // Strip control characters: the client renders names into innerHTML-built markup.
-        const name = body.name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 16);
-        if (!name) throw badRequest(SERVER_ERRORS.invalidProfile, 'name is empty after sanitising');
-        save.name = name;
-      }
-      if (body.avatar !== undefined) {
-        // The profile modal offers exactly ten emoji (L2928); anything else is a crafted request.
-        if (PROFILE_AVATARS.indexOf(body.avatar) < 0) throw badRequest(SERVER_ERRORS.invalidProfile, 'unknown avatar');
-        save.avatar = body.avatar;
-      }
-      if (body.sfx !== undefined) save.sfx = body.sfx;
-      // One-way: the first-run explainer can be dismissed but not un-dismissed, so a stale
-      // client cannot make it reappear for someone who has already played.
-      if (body.seen === true) save.seen = true;
-      if (body.deck !== undefined) {
-        const deck = validateDeck(save, body.deck);
-        if (!deck) throw badRequest(SERVER_ERRORS.invalidDeck, 'deck must be 8 distinct owned cards');
-        save.deck = deck;
-      }
-
-      const persisted = await persistSave(store, user.id, save);
+      // Compare-and-set like every other writer. This is the write the client fires most often
+      // — the deck editor saves on each card swap — so an unguarded one here is the most likely
+      // thing to land on top of a match payout and erase it.
+      const { save: persisted } = await mutateSave(store, user, (save) => {
+        if (body.name !== undefined) {
+          // Strip control characters: the client renders names into innerHTML-built markup.
+          const name = body.name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 16);
+          if (!name) throw badRequest(SERVER_ERRORS.invalidProfile, 'name is empty after sanitising');
+          save.name = name;
+        }
+        if (body.avatar !== undefined) {
+          // The profile modal offers exactly ten emoji (L2928); anything else is a crafted request.
+          if (PROFILE_AVATARS.indexOf(body.avatar) < 0) throw badRequest(SERVER_ERRORS.invalidProfile, 'unknown avatar');
+          save.avatar = body.avatar;
+        }
+        if (body.sfx !== undefined) save.sfx = body.sfx;
+        // One-way: the first-run explainer can be dismissed but not un-dismissed, so a stale
+        // client cannot make it reappear for someone who has already played.
+        if (body.seen === true) save.seen = true;
+        if (body.deck !== undefined) {
+          // Re-validated on every attempt: a retry runs against a freshly-read save, and a deck
+          // is only legal relative to the cards that save owns.
+          const deck = validateDeck(save, body.deck);
+          if (!deck) throw badRequest(SERVER_ERRORS.invalidDeck, 'deck must be 8 distinct owned cards');
+          save.deck = deck;
+        }
+      });
       return { save: persisted };
     },
   );

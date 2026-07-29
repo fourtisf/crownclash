@@ -91,6 +91,13 @@ export class Rng {
  */
 export function randomSeed(): string {
   const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
+  // Declared locally rather than by pulling in the DOM or @types/node libs: this package must
+  // compile with `"types": []` so it stays honestly platform-neutral. WebCrypto's
+  // `getRandomValues` is present on `globalThis` in every browser and in Node >= 19.
+  const webcrypto = (globalThis as { crypto?: { getRandomValues(a: Uint8Array): Uint8Array } }).crypto;
+  if (!webcrypto?.getRandomValues) {
+    throw new Error('WebCrypto is unavailable; a match seed must not fall back to Math.random()');
+  }
+  webcrypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }

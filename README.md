@@ -23,7 +23,7 @@ ship it — without changing how the game looks or feels.
 | Ops (PM2, nginx, deploy script, CI) | Configs committed and reviewed |
 | Deployed to a VPS | **No.** Nothing here has run on a server. See [Deploying](#deploying). |
 | `prisma/migrations/` | **Not created yet.** `prisma/schema.prisma` is committed; the initial migration is not. See [`docs/DEPLOY.md`](docs/DEPLOY.md) § Migrations. |
-| Running the *compiled* server under plain Node | **Blocked**, one field away: `@crown/shared` exports TypeScript source, so `node dist/src/index.js` cannot resolve it. Dev, tests and typecheck are unaffected. [`docs/DEPLOY.md`](docs/DEPLOY.md) § Check 2 has the diagnosis and the fix. |
+| Running the *compiled* server under plain Node | **Yes.** `pnpm build` emits `packages/shared/dist` and `apps/server/dist`, and `node apps/server/dist/src/index.js` boots and listens — which is what PM2 runs. Verified locally; still never run on a VPS. |
 
 ---
 

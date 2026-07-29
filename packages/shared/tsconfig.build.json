@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // rootDir "src" (rather than "." as in tsconfig.json, which also covers test/) is what
+    // makes the emitted entry dist/index.js instead of dist/src/index.js.
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "declaration": true
+  },
+  "include": ["src/**/*.ts"]
+}

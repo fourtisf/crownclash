@@ -26,6 +26,8 @@ import { Fx } from './fx';
 import { S } from './api/store';
 import { setToast } from './ui/toast';
 import { startTutorial, stopTutorial } from './screens/tutorial';
+import { hitStop, hitStopActive, resetHitStop, setQuality } from './gfx';
+import { setAmbienceArena } from './ambience';
 import { closeModal, lockModal, openModal } from './ui/modal';
 
 /** The live battle, or null when we are not in one. Mirrors the prototype's `B` global. */
@@ -144,12 +146,16 @@ export function startBattle(start: MatchStartResponse): void {
     mult: 1,
     t: sim.state.t,
     phase: 'normal',
+    dt: 0,
   };
 
   must('#bMyName').textContent = S.name;
   must('#bEnemyName').textContent = start.aiName;
 
+  setQuality(S.quality);
+  resetHitStop();
   setArenaTrophies(S.trophies);
+  setAmbienceArena(S.trophies);
   buildArenaBG();
   setToast('');
   cb?.go('battle');
@@ -521,6 +527,12 @@ function loop(ts: number): void {
       }
       const events = B.sim.tick(aiUpdate);
       B.fx.apply(events);
+      for (const e of events) {
+        // Freeze the picture for a beat on the two moments that should land like a punch.
+        // Rendering only — the accumulator keeps ticking, so the deploy log is untouched.
+        if (e.k === 'towerDown') hitStop(110);
+        else if (e.k === 'deathBlast') hitStop(70);
+      }
       acc -= DT;
       steps++;
       if (st.over) break;
@@ -531,6 +543,7 @@ function loop(ts: number): void {
   B.fx.step(frame);
 
   // Mirror the fields the verbatim renderer reads off `B`.
+  B.dt = frame;
   B.time = st.time + Math.min(acc, DT);
   B.over = st.over;
   B.hand = st.hand;
@@ -555,7 +568,7 @@ function loop(ts: number): void {
   if (flash) flash.style.opacity = String(B.fx.flashOpacity());
 
   if (!aCtx) sizeArena();
-  drawInterpolated(st.over ? 0 : clamp(acc / DT, 0, 1));
+  if (!hitStopActive(ts)) drawInterpolated(st.over ? 0 : clamp(acc / DT, 0, 1));
   updateHud();
   updateCrowns();
 

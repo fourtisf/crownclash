@@ -1,12 +1,18 @@
 /**
- * AUTO-GENERATED — DO NOT EDIT BY HAND.
+ * Arena backdrop — pre-rendered once per match into an offscreen canvas.
  *
- * The region between the VERBATIM SLICE markers is copied byte-for-byte out of
- * reference/crown-clash.html. Regenerate with `pnpm extract`; `pnpm extract:check`
- * fails the build if it drifts. Edit the prototype, not this file.
+ * Started life as a byte-for-byte slice of reference/crown-clash.html L1478-L1651, and was
+ * released from `tools/extract.mjs` when the owner asked for a modernised look — you cannot
+ * restyle a file that must stay identical. It is now maintained by hand.
  *
- * These files carry @ts-nocheck on purpose: type-annotating them would mean editing the
- * slice, which is exactly what we are preventing. The typed surface lives in engine.ts.
+ * The prototype remains the reference for *shape*: proportions, silhouettes and the sticker
+ * outline that make the game recognisable are unchanged. What has moved on is lighting,
+ * blending and effects. Gameplay constants are untouched and still locked to the prototype by
+ * packages/shared/test/data-parity.test.ts.
+ *
+ * Still @ts-nocheck: this is 500+ lines of dense procedural canvas whose every local is a
+ * number. Annotating it would add noise without catching a class of bug that matters here.
+ * The typed surface consumers see lives in engine.ts.
  */
 // @ts-nocheck
 /* eslint-disable */
@@ -28,7 +34,6 @@ export let arenaBG = null;
 export function setArenaTrophies(t) { S = { trophies: t | 0 }; }
 export function getArenaBG() { return arenaBG; }
 
-/* ==== BEGIN VERBATIM SLICE — crown-clash.html L1478-L1651 ==== */
 function buildArenaBG(){
   const {a}=arenaFor(S.trophies);
   const s=48, cv=document.createElement('canvas'), c=fitCanvas(cv,AW*s,AH*s);
@@ -203,6 +208,5 @@ function buildArenaBG(){
   c.fillStyle=vg2; c.fillRect(0,0,W,H);
   arenaBG=cv;
 }
-/* ==== END VERBATIM SLICE ==== */
 
 export { buildArenaBG };

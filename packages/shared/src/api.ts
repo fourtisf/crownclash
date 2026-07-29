@@ -8,7 +8,7 @@
  * the server owns the save. The client never patches its local copy from its own optimism;
  * it replaces it with whatever comes back.
  */
-import type { ChestKey, DeployLogEntry, MatchOutcome, SaveState } from './types.js';
+import type { ChestKey, DeployLogEntry, MatchOutcome, Quality, SaveState } from './types.js';
 import type { ChestResult, MatchRewards } from './economy.js';
 
 export const API_PREFIX = '/api';
@@ -78,6 +78,8 @@ export interface ProfileUpdateRequest {
   seen?: boolean;
   /** First-match coach marks finished or skipped. One-way: it can only be set true. */
   tutorialDone?: boolean;
+  /** Graphics preset. */
+  quality?: Quality;
 }
 
 /* --------------------------------------------------------------------- match */

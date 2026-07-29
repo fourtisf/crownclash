@@ -12,6 +12,7 @@ import { S, boot, onSaveChange, refresh, setSave } from './api/store';
 import { initBattle, sizeArena, startBattle, stopBattle } from './battle';
 import { $, $$, must } from './dom';
 import { Snd, setSfxEnabled } from './engine';
+import { setQuality } from './gfx';
 import { bindModals, closeModal, openModal } from './ui/modal';
 import { toastTop } from './ui/toast';
 import { markDots, setTab } from './ui/tabs';
@@ -120,7 +121,11 @@ async function init(): Promise<void> {
   }
 
   setSfxEnabled(S.sfx);
-  onSaveChange((s) => setSfxEnabled(s.sfx));
+  setQuality(S.quality);
+  onSaveChange((s) => {
+    setSfxEnabled(s.sfx);
+    setQuality(s.quality);
+  });
 
   initLanding(() => {
     Snd.init();

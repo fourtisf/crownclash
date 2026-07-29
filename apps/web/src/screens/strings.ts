@@ -191,6 +191,8 @@ export const STR = {
 
   /* --------------------------------------------------------------- settings */
   settings: {
+    quality: 'GRAPHICS',
+    qualityNames: { low: 'LOW', med: 'MEDIUM', high: 'HIGH' } as const,
     title: 'PROFILE',
     sub: 'Change your name & avatar',
     sfxOn: '🔊 SUARA: ON',

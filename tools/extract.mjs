@@ -12,6 +12,18 @@
  *
  * Handoff §1: "Write a test that ... diffs them against data.ts so drift is impossible."
  * This is the stronger form of that rule for the files that are pure presentation.
+ *
+ * ## Scope, after the art fork
+ *
+ * `art.ts`, `render.ts` and `arenaBg.ts` were originally slices too. The owner asked for a
+ * modernised look, which cannot be done to a file that must stay byte-identical, so those
+ * three were released and are now maintained by hand. Their headers record the line ranges
+ * they came from.
+ *
+ * What still matters is unchanged: `packages/shared/test/data-parity.test.ts` keeps every
+ * gameplay constant locked to the prototype. Art is presentation; `data.ts` is the game.
+ * `styles.css` (the app chrome, which was not part of the restyle) and `sound.ts` stay
+ * verbatim because nothing has asked them to change.
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -47,86 +59,6 @@ const TARGETS = [
     lang: 'css',
     prelude: `/* AUTO-GENERATED from reference/crown-clash.html — DO NOT EDIT. Run \`pnpm extract\`. */\n`,
     postlude: '',
-  },
-  {
-    out: 'apps/web/src/art.ts',
-    from: 802,
-    to: 1337,
-    prelude: `${BANNER}
-import { clamp } from '@crown/shared';
-import { CARD, CHESTS, RARITY } from '@crown/shared';
-`,
-    postlude: `
-export {
-  shade, rr, ell, circ, limb, fitCanvas,
-  Art, OL, ols, vg, shp, pill, disc, rim, gsh, face,
-  renderPortrait,
-};
-`,
-  },
-  {
-    out: 'apps/web/src/arenaBg.ts',
-    from: 1478,
-    to: 1651,
-    prelude: `${BANNER}
-import { AW, AH, RIV_T, RIV_B, BRIDGE, arenaFor } from '@crown/shared';
-import { fitCanvas, rr, shade } from './art';
-
-/**
- * The slice reads \`S.trophies\` (to pick the arena palette) and assigns the module-level
- * \`arenaBG\` at the end of buildArenaBG(). Both are declared here so the slice stays untouched.
- *
- * \`arenaBG\` is exported as a \`let\` on purpose: ES module live bindings mean render.ts sees
- * the new canvas the moment buildArenaBG() reassigns it, exactly as it saw the prototype's
- * shared global. A getter would have worked too, but the slice writes \`arenaBG=cv\` verbatim.
- */
-let S = { trophies: 0 };
-export let arenaBG = null;
-
-export function setArenaTrophies(t) { S = { trophies: t | 0 }; }
-export function getArenaBG() { return arenaBG; }
-`,
-    postlude: `
-export { buildArenaBG };
-`,
-  },
-  {
-    out: 'apps/web/src/render.ts',
-    from: 2060,
-    to: 2226,
-    prelude: `${BANNER}
-import { AW, AH, RIV_B, CARD, clamp, lerp } from '@crown/shared';
-import { towerAlive as simTowerAlive, canDeployAt as simCanDeployAt } from '@crown/shared';
-import { Art, rr, ell } from './art';
-import { arenaBG } from './arenaBg';
-
-/**
- * Presentation-only randomness (screen shake). Deliberately NOT \`Rng\` from @crown/shared:
- * shared exposes randomness solely on a seeded stream so no simulation code can reach for an
- * unseeded one. Jitter on a camera shake has no bearing on the match result, so it uses
- * Math.random directly and stays out of the seeded stream entirely.
- */
-const rnd = (a, b) => a + Math.random() * (b - a);
-
-/**
- * \`B\` is the battle facade the screen assigns before each frame: the shared sim's state
- * plus the client-only FX collections (parts/floats/rings) and view fields (sc, ghost,
- * selected, shake). Keeping its shape identical to the prototype's \`B\` is what lets
- * render() below stay a verbatim slice.
- */
-let B = null;
-let aCtx = null;
-
-export function bindRenderer(battle, ctx) { B = battle; aCtx = ctx; }
-
-/* The prototype read the ambient \`B\`/\`arenaBG\` globals; these shims preserve the call
-   signatures the slice uses while the real implementations take explicit state. */
-const towerAlive = (team, side) => simTowerAlive(B, team, side);
-const canDeployAt = (team, x, y, card) => simCanDeployAt(B, team, x, y, card);
-`,
-    postlude: `
-export { render, unitTopY, drawBar };
-`,
   },
   {
     out: 'apps/web/src/sound.ts',

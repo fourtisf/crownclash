@@ -8,7 +8,8 @@
  * only thing allowed to replace it is `setSave()`.
  */
 import { $$, must } from '../dom';
-import { setSfxEnabled } from '../engine';
+import { Snd, setSfxEnabled } from '../engine';
+import { setQuality } from '../gfx';
 import { S, setSave } from '../api/store';
 import { api } from '../api/client';
 import { closeModal, openModal } from '../ui/modal';
@@ -17,7 +18,7 @@ import { setTab } from '../ui/tabs';
 import { refreshHeader } from './home';
 import { STR } from './strings';
 import { apiMessage } from './errors';
-import type { ProfileUpdateRequest } from '@crown/shared';
+import type { ProfileUpdateRequest, Quality } from '@crown/shared';
 
 const AVATARS = ['👑', '⚔️', '🛡️', '🐉', '🔥', '💀', '🦁', '🧙', '🏹', '⚡'];
 
@@ -39,6 +40,18 @@ export function openSettings(): void {
       '</div>' +
       '<button class="btn ' + (S.sfx ? 'green' : 'ghost') + '" id="stSfx" style="width:100%;margin-bottom:8px">' +
       (S.sfx ? STR.settings.sfxOn : STR.settings.sfxOff) + '</button>' +
+      // Graphics preset. Applied the moment it is tapped rather than on SAVE, because the
+      // only way to judge it is to look at it — and the arena is one tap away.
+      '<div class="qlabel">' + STR.settings.quality + '</div>' +
+      '<div class="qrow" id="stQuality">' +
+      (['low', 'med', 'high'] as const)
+        .map(
+          (q) =>
+            '<button class="qbtn' + (S.quality === q ? ' on' : '') + '" data-q="' + q + '">' +
+            STR.settings.qualityNames[q] + '</button>',
+        )
+        .join('') +
+      '</div>' +
       '<button class="btn gold" id="stSave" style="width:100%">' + STR.settings.save + '</button>' +
       '<div class="hint" style="margin-top:10px">' + STR.settings.note + '</div>',
   );
@@ -108,6 +121,23 @@ export function openSettings(): void {
       toastTop(apiMessage(err, STR.settings.saveFailed));
     }
   };
+
+  // Graphics preset: apply immediately and persist immediately. It is a device preference,
+  // not part of the name/avatar draft that SAVE commits.
+  must('#stQuality').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('.qbtn');
+    if (!b) return;
+    const q = b.dataset.q as Quality;
+    if (!q || q === S.quality) return;
+    setQuality(q);
+    S.quality = q;
+    must('#stQuality').querySelectorAll('.qbtn').forEach((n) => n.classList.toggle('on', (n as HTMLElement).dataset.q === q));
+    Snd.play(700, 0.05, 'triangle', 0.05);
+    void api
+      .updateProfile({ quality: q })
+      .then((r) => setSave(r.save))
+      .catch(() => undefined);
+  });
 
   const save = must<HTMLButtonElement>('#stSave');
   save.onclick = async () => {

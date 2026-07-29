@@ -72,6 +72,8 @@ export const setArenaTrophies: (t: number) => void = arenaBgModule.setArenaTroph
 export interface RenderFacade {
   sc: number;
   time: number;
+  /** Seconds since the previous rendered frame — drives weather and water, not the sim. */
+  dt: number;
   over: boolean;
   selected: number;
   ghost: { x: number; y: number } | null;

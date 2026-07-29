@@ -1,12 +1,18 @@
 /**
- * AUTO-GENERATED — DO NOT EDIT BY HAND.
+ * Battle renderer — draws one frame of the arena.
  *
- * The region between the VERBATIM SLICE markers is copied byte-for-byte out of
- * reference/crown-clash.html. Regenerate with `pnpm extract`; `pnpm extract:check`
- * fails the build if it drifts. Edit the prototype, not this file.
+ * Started life as a byte-for-byte slice of reference/crown-clash.html L2060-L2226, and was
+ * released from `tools/extract.mjs` when the owner asked for a modernised look — you cannot
+ * restyle a file that must stay identical. It is now maintained by hand.
  *
- * These files carry @ts-nocheck on purpose: type-annotating them would mean editing the
- * slice, which is exactly what we are preventing. The typed surface lives in engine.ts.
+ * The prototype remains the reference for *shape*: proportions, silhouettes and the sticker
+ * outline that make the game recognisable are unchanged. What has moved on is lighting,
+ * blending and effects. Gameplay constants are untouched and still locked to the prototype by
+ * packages/shared/test/data-parity.test.ts.
+ *
+ * Still @ts-nocheck: this is 500+ lines of dense procedural canvas whose every local is a
+ * number. Annotating it would add noise without catching a class of bug that matters here.
+ * The typed surface consumers see lives in engine.ts.
  */
 // @ts-nocheck
 /* eslint-disable */
@@ -14,6 +20,8 @@
 import { AW, AH, RIV_B, CARD, clamp, lerp } from '@crown/shared';
 import { towerAlive as simTowerAlive, canDeployAt as simCanDeployAt } from '@crown/shared';
 import { Art, rr, ell } from './art';
+import { beginEmissive, blob, endEmissive, profile } from './gfx';
+import { drawAmbience, drawGrade } from './ambience';
 import { arenaBG } from './arenaBg';
 
 /**
@@ -40,7 +48,6 @@ export function bindRenderer(battle, ctx) { B = battle; aCtx = ctx; }
 const towerAlive = (team, side) => simTowerAlive(B, team, side);
 const canDeployAt = (team, x, y, card) => simCanDeployAt(B, team, x, y, card);
 
-/* ==== BEGIN VERBATIM SLICE — crown-clash.html L2060-L2226 ==== */
 function unitTopY(u){
   if(u.kind==='tower') return u.y-(u.twKind==='king'?2.35:1.85);
   if(u.kind==='build') return u.y-1.0;
@@ -60,6 +67,9 @@ function render(){
   c.clearRect(0,0,AW*sc,AH*sc);
   if(B.shake>.2) c.translate(rnd(-B.shake,B.shake)*.35,rnd(-B.shake,B.shake)*.35);
   c.drawImage(arenaBG,0,0,AW*sc,AH*sc);
+  // Water, cloud shadows and weather go here — over the baked backdrop, under the troops, so
+  // units stand *in* the scene rather than on a picture of it.
+  drawAmbience(c,sc,B.time,B.dt||0);
 
   /* zona deploy */
   if(B.selected>=0&&!B.over){
@@ -105,7 +115,7 @@ function render(){
   }
   /* entity */
   const list=B.units.filter(u=>!u.dead||u.kind==='tower').slice().sort((a,b)=>a.y-b.y);
-  Art.hq=list.length<28;
+  Art.hq=list.length<profile().hqUnitLimit;
   for(const u of list){
     if(u.dead&&u.kind==='tower'){
       c.save(); c.translate(u.x*sc,u.y*sc);
@@ -168,28 +178,65 @@ function render(){
     }
     c.restore();
   }
-  /* partikel */
+  /* ---- particles: additive, soft, and echoed into the bloom buffer ----
+     The prototype drew each spark as an opaque square with `fillRect` and never touched
+     `globalCompositeOperation`, so a shower of embers looked like confetti rather than fire.
+     Everything here composites with `lighter` so overlapping sparks brighten toward white. */
+  const em = beginEmissive(AW * sc, AH * sc);
+  c.save();
+  c.globalCompositeOperation = 'lighter';
   for(const p of B.parts){
     const a=clamp(p.life/p.max,0,1);
     if(p.ring){
-      c.strokeStyle=p.c; c.globalAlpha=a*.85; c.lineWidth=Math.max(2,.12*sc*a);
-      c.beginPath(); c.arc(p.x*sc,p.y*sc,p.sz*sc*(1.35-a*.35),0,6.3); c.stroke(); c.globalAlpha=1;
+      // Shockwave: a bright thin edge with a soft interior wash, expanding as it fades.
+      const rad=p.sz*sc*(1.35-a*.35);
+      c.strokeStyle=p.c; c.globalAlpha=a*.9; c.lineWidth=Math.max(2,.12*sc*a);
+      c.beginPath(); c.arc(p.x*sc,p.y*sc,rad,0,6.3); c.stroke(); c.globalAlpha=1;
+      blob(c,p.x*sc,p.y*sc,rad*.9,p.c,a*.22);
+      if(em){ em.strokeStyle=p.c; em.globalAlpha=a*.9; em.lineWidth=Math.max(2,.12*sc*a);
+        em.beginPath(); em.arc(p.x*sc,p.y*sc,rad,0,6.3); em.stroke(); em.globalAlpha=1; }
     } else if(p.arrow){
-      c.strokeStyle=p.c; c.globalAlpha=a; c.lineWidth=2;
-      c.beginPath(); c.moveTo(p.x*sc,p.y*sc); c.lineTo(p.x*sc,p.y*sc+.4*sc); c.stroke(); c.globalAlpha=1;
+      // Falling volley arrow: a streak, brightest at the head.
+      const g=c.createLinearGradient(p.x*sc,p.y*sc,p.x*sc,p.y*sc+.5*sc);
+      g.addColorStop(0,'rgba(255,255,255,0)'); g.addColorStop(1,p.c);
+      c.strokeStyle=g; c.globalAlpha=a; c.lineWidth=2.2;
+      c.beginPath(); c.moveTo(p.x*sc,p.y*sc); c.lineTo(p.x*sc,p.y*sc+.5*sc); c.stroke(); c.globalAlpha=1;
     } else {
-      c.fillStyle=p.c; c.globalAlpha=a;
-      c.fillRect(p.x*sc-p.sz*sc/2,p.y*sc-p.sz*sc/2,p.sz*sc,p.sz*sc); c.globalAlpha=1;
+      // Ember. Velocity stretches it into a streak, which is most of what sells motion.
+      const r=Math.max(1.2,p.sz*sc*1.9);
+      const sp=Math.hypot(p.vx,p.vy);
+      blob(c,p.x*sc,p.y*sc,r,p.c,a*.95);
+      if(sp>2.2){
+        const k=Math.min(.09,sp*.006);
+        blob(c,(p.x-p.vx*k)*sc,(p.y-p.vy*k)*sc,r*.62,p.c,a*.45);
+      }
+      if(em) blob(em,p.x*sc,p.y*sc,r*1.5,p.c,a*.8);
     }
   }
-  /* angka damage */
-  c.textAlign='center'; c.font='700 '+Math.max(10,.42*sc)+'px "Trebuchet MS",sans-serif';
+  c.restore();
+
+  /* ---- damage numbers ----
+     Punch out to 1.35x on the first ~120 ms then settle, and arc upward rather than sliding
+     straight up. A number that scales in is read as an event; one that only drifts is noise. */
+  c.textAlign='center';
   for(const f of B.floats){
     const p=f.t/f.dur;
-    c.globalAlpha=1-p*p; c.fillStyle='rgba(0,0,0,.65)';
-    c.fillText(f.txt,f.x*sc+1.5,(f.y-p*1.1)*sc+1.5);
-    c.fillStyle=f.c; c.fillText(f.txt,f.x*sc,(f.y-p*1.1)*sc); c.globalAlpha=1;
+    const pop=p<.18? 1.35-.35*(p/.18) : 1;
+    const rise=(f.y-(p*1.1+p*p*.35))*sc;
+    const drift=Math.sin(p*3.1)*.18*sc;
+    const size=Math.max(10,.44*sc)*pop;
+    c.font='700 '+size.toFixed(1)+'px "Trebuchet MS",sans-serif';
+    c.globalAlpha=1-p*p;
+    c.lineJoin='round';
+    c.lineWidth=Math.max(2.5,size*.24);
+    c.strokeStyle='rgba(12,8,20,.8)';
+    c.strokeText(f.txt,f.x*sc+drift,rise);
+    c.fillStyle=f.c;
+    c.fillText(f.txt,f.x*sc+drift,rise);
+    c.globalAlpha=1;
   }
+  endEmissive(c);
+  drawGrade(c,sc);
   /* ghost deploy */
   if(B.ghost&&B.selected>=0&&!B.over){
     const card=CARD[B.hand[B.selected]], ok=canDeployAt(0,B.ghost.x,B.ghost.y,card);
@@ -208,6 +255,5 @@ function render(){
   }
   c.restore();
 }
-/* ==== END VERBATIM SLICE ==== */
 
 export { render, unitTopY, drawBar };

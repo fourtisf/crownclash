@@ -183,6 +183,7 @@ export function sanitizeSave(input: unknown): SaveSanitizeResult {
   s.sfx = !!s.sfx;
   s.seen = !!s.seen;
   s.tutorialDone = !!s.tutorialDone;
+  s.quality = s.quality === 'low' || s.quality === 'med' ? s.quality : 'high';
   s.v = 1;
 
   // Wallet identity is owned by the server's auth flow; a client save can never assert it.

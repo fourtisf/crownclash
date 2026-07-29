@@ -1,12 +1,18 @@
 /**
- * AUTO-GENERATED — DO NOT EDIT BY HAND.
+ * Procedural art engine — every unit, tower, chest and card portrait.
  *
- * The region between the VERBATIM SLICE markers is copied byte-for-byte out of
- * reference/crown-clash.html. Regenerate with `pnpm extract`; `pnpm extract:check`
- * fails the build if it drifts. Edit the prototype, not this file.
+ * Started life as a byte-for-byte slice of reference/crown-clash.html L802-L1337, and was
+ * released from `tools/extract.mjs` when the owner asked for a modernised look — you cannot
+ * restyle a file that must stay identical. It is now maintained by hand.
  *
- * These files carry @ts-nocheck on purpose: type-annotating them would mean editing the
- * slice, which is exactly what we are preventing. The typed surface lives in engine.ts.
+ * The prototype remains the reference for *shape*: proportions, silhouettes and the sticker
+ * outline that make the game recognisable are unchanged. What has moved on is lighting,
+ * blending and effects. Gameplay constants are untouched and still locked to the prototype by
+ * packages/shared/test/data-parity.test.ts.
+ *
+ * Still @ts-nocheck: this is 500+ lines of dense procedural canvas whose every local is a
+ * number. Annotating it would add noise without catching a class of bug that matters here.
+ * The typed surface consumers see lives in engine.ts.
  */
 // @ts-nocheck
 /* eslint-disable */
@@ -14,7 +20,6 @@
 import { clamp } from '@crown/shared';
 import { CARD, CHESTS, RARITY } from '@crown/shared';
 
-/* ==== BEGIN VERBATIM SLICE — crown-clash.html L802-L1337 ==== */
 function shade(hex,amt){
   if(hex&&hex[0]!=='#'){ const m=/rgba?\(([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)/.exec(hex);
     if(m){ const f0=v=>clamp(Math.round(amt<0? v*(1+amt) : v+(255-v)*amt),0,255);
@@ -45,17 +50,63 @@ const Art={hq:true};
 const OL='#2b1a10';
 function ols(c,w){ c.strokeStyle=OL; c.lineWidth=w; c.lineJoin='round'; c.lineCap='round'; c.stroke(); }
 function vg(c,y0,y1,a,b){ const g=c.createLinearGradient(0,y0,0,y1); g.addColorStop(0,a); g.addColorStop(1,b); return g; }
+/* Parse '#rgb', '#rrggbb' or 'rgb(r,g,b)' into components. */
+function rgbOf(col){
+  if(col&&col[0]==='#'){ let h=col.slice(1); if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+  const m=/rgba?\(([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)/.exec(col||'');
+  return m? [+m[1],+m[2],+m[3]] : [128,128,128];
+}
+function mixTo(col,target,t){
+  const a=rgbOf(col);
+  return 'rgb('+Math.round(a[0]+(target[0]-a[0])*t)+','+Math.round(a[1]+(target[1]-a[1])*t)+','+Math.round(a[2]+(target[2]-a[2])*t)+')';
+}
+
+/*
+ * Light model.
+ *
+ * The prototype shaded every surface by lightening the top and darkening the bottom of the
+ * same hue. That is *value* without *colour*, and it is why the art read as flat no matter
+ * how clean the shapes were: real light is warm and the shadow it leaves is filled by cool
+ * bounced sky. Pushing highlights toward a warm key and shadows toward a cool ambient — the
+ * oldest trick in painting — gives every shape in the game a sense of being lit, and costs a
+ * single extra colour mix per fill.
+ */
+const KEY_LIGHT=[255,238,196];
+const AMBIENT=[58,78,132];
+
 /* isi path yang sudah dibangun: gradient atas-terang bawah-gelap + outline tebal */
 function shp(c,col,lw,top,bot,lift){
   const hh=Math.abs(bot-top)||lw*4;
-  c.fillStyle=vg(c,top,bot,shade(col,lift===undefined?.30:lift),shade(col,-.24));
+  const hi=mixTo(shade(col,lift===undefined?.34:lift),KEY_LIGHT,.17);
+  const lo=mixTo(shade(col,-.30),AMBIENT,.22);
+  c.fillStyle=vg(c,top,bot,hi,lo);
   c.fill(); ols(c,Math.max(.85,Math.min(lw,hh*.17)));
 }
 function pill(c,x,y,w,h,r,col,lw){ rr(c,x,y,w,h,r); shp(c,col,lw,y,y+h); }
 function disc(c,x,y,r,col,lw){ c.beginPath(); c.arc(x,y,r,0,6.2832); shp(c,col,lw,y-r,y+r); }
 /* kilau rim di kiri-atas */
-function rim(c,x,y,rx,ry,al){ c.fillStyle='rgba(255,255,255,'+(al||.34)+')'; c.beginPath(); c.ellipse(x,y,rx,ry,-.5,0,6.2832); c.fill(); }
-function gsh(c,u,sc){ ell(c,0,.035*u,(sc||.30)*u,(sc||.30)*u*.34,'rgba(0,0,0,.32)'); }
+/* Specular catch on the upper-left, matching KEY_LIGHT. Soft-edged rather than a flat ellipse:
+   a hard white blob reads as a sticker, a falloff reads as a highlight. */
+function rim(c,x,y,rx,ry,al){
+  const a=al||.34;
+  const g=c.createRadialGradient(x,y,0,x,y,Math.max(rx,ry));
+  g.addColorStop(0,'rgba(255,251,236,'+(a*1.1)+')');
+  g.addColorStop(.6,'rgba(255,245,220,'+(a*.5)+')');
+  g.addColorStop(1,'rgba(255,240,210,0)');
+  c.fillStyle=g; c.beginPath(); c.ellipse(x,y,rx*1.25,ry*1.25,-.5,0,6.2832); c.fill();
+}
+/* Contact shadow. Dense and tight where the unit meets the ground, falling away quickly —
+   a uniform ellipse makes everything look like it is hovering a centimetre up. */
+function gsh(c,u,sc){
+  const r=(sc||.30)*u;
+  const g=c.createRadialGradient(0,.035*u,0,0,.035*u,r);
+  g.addColorStop(0,'rgba(8,10,26,.42)');
+  g.addColorStop(.55,'rgba(8,10,26,.22)');
+  g.addColorStop(1,'rgba(8,10,26,0)');
+  c.save(); c.translate(0,.035*u); c.scale(1,.34); c.fillStyle=g;
+  c.beginPath(); c.arc(0,0,r,0,6.2832); c.fill(); c.restore();
+}
 
 /* ---- senjata: pegangan di (0,0), ujung ke -y ---- */
 Art.weapon=function(c,kind,u,glow){
@@ -453,41 +504,129 @@ Art.chest=function(c,kind,o){
 };
 
 /* ---- TOWER ---- */
-Art.tower=function(c,kind,team,o){
-  const s=o.s,king=kind==='king',lw=Math.max(1.2,s*.040);
-  const w=(king?1.55:1.24)*s, h=(king?1.95:1.55)*s;
-  const c1=team===0?'#4b8dff':'#ff4d4d', c2=team===0?'#1e4bb8':'#a81f1f';
-  ell(c,0,.20*s,w*.66,w*.24,'rgba(0,0,0,.38)');
-  c.beginPath(); rr(c,-w/2-.09*s,-.10*s,w+.18*s,.30*s,.07*s); shp(c,'#9aa3b8',lw,-.10*s,.20*s);
+/*
+ * One stone shaft: plinth, body, brick coursing, crenellated top.
+ *
+ * Factored out of Art.tower so the King's keep can be built from three of them. The princess
+ * tower passes exactly the numbers the single-tower version used, so it is unchanged.
+ */
+function towerShaft(c,s,lw,w,h,merlons,plinth){
+  if(plinth!==false){
+    c.beginPath(); rr(c,-w/2-.09*s,-.10*s,w+.18*s,.30*s,.07*s); shp(c,'#9aa3b8',lw,-.10*s,.20*s);
+  }
   c.beginPath(); rr(c,-w/2,-h,w,h+.02*s,.08*s); shp(c,'#b8c1d4',lw,-h,0,.16);
   c.save(); c.beginPath(); rr(c,-w/2,-h,w,h+.02*s,.08*s); c.clip();
   c.strokeStyle='rgba(45,55,78,.42)'; c.lineWidth=Math.max(1,s*.028);
-  const rows=king?6:5, rh=h/rows;
+  const rows=Math.max(3,Math.round(h/(s*.32))), rh=h/rows;
   for(let i=1;i<rows;i++){ c.beginPath(); c.moveTo(-w/2,-h+rh*i); c.lineTo(w/2,-h+rh*i); c.stroke(); }
   for(let i=0;i<rows;i++){ const y=-h+rh*i, off=(i%2)?w*.17:-w*.17;
     c.beginPath(); c.moveTo(off,y); c.lineTo(off,y+rh); c.stroke();
     c.beginPath(); c.moveTo(off+(i%2?-w*.34:w*.34),y); c.lineTo(off+(i%2?-w*.34:w*.34),y+rh); c.stroke(); }
-  c.fillStyle='rgba(255,255,255,.20)'; c.fillRect(-w/2,-h,w*.24,h);
-  c.fillStyle='rgba(20,28,48,.20)'; c.fillRect(w*.28,-h,w*.22,h);
+  /* Key light from the upper left, matching every other shape in the game. */
+  c.fillStyle='rgba(255,248,230,.20)'; c.fillRect(-w/2,-h,w*.24,h);
+  c.fillStyle='rgba(20,28,48,.22)'; c.fillRect(w*.28,-h,w*.22,h);
   c.restore();
-  const n=king?5:4, cw=w/n;
-  for(let i=0;i<n;i++){ c.beginPath(); rr(c,-w/2+i*cw+.02*s,-h-.24*s,cw-.07*s,.28*s,.03*s); shp(c,'#c9d2e2',lw,-h-.24*s,-h+.04*s,.14); }
+  const cw=w/merlons;
+  for(let i=0;i<merlons;i++){
+    c.beginPath(); rr(c,-w/2+i*cw+.02*s,-h-.24*s,cw-.07*s,.28*s,.03*s);
+    shp(c,'#c9d2e2',lw,-h-.24*s,-h+.04*s,.14);
+  }
+}
+
+/*
+ * Tower.
+ *
+ * The princess towers are single shafts. The King's is a **keep**: a tall central hall flanked
+ * by two shorter towers on a shared plinth, joined by a curtain wall. The prototype drew it as
+ * one slightly-larger block, which made the most important structure on the board read as
+ * "the same tower again" — the piece that ends the match instantly deserves to look like it.
+ *
+ * Purely visual. Position, radius, range, HP and hitbox are untouched, so nothing about the
+ * simulation or the balance changes; TOWER_DEF and TOWER_POS are still locked to the prototype
+ * by the data-parity test.
+ */
+Art.tower=function(c,kind,team,o){
+  const s=o.s,king=kind==='king',lw=Math.max(1.2,s*.040);
+  const c1=team===0?'#4b8dff':'#ff4d4d';
+  const w=(king?1.55:1.24)*s, h=(king?1.95:1.55)*s;
+
+  if(king){
+    const keepW=1.12*s, keepH=1.98*s;      // central hall
+    const sideW=.62*s, sideH=1.22*s;       // flanking towers
+    const sideX=.80*s;                     // how far out they sit
+    const span=sideX*2+sideW;
+
+    /* Ground shadow spans the whole keep, not just the middle tower. */
+    ell(c,0,.20*s,span*.60,span*.20,'rgba(0,0,0,.40)');
+
+    /* Shared plinth. */
+    c.beginPath(); rr(c,-span/2-.10*s,-.12*s,span+.20*s,.34*s,.08*s); shp(c,'#9aa3b8',lw,-.12*s,.22*s);
+
+    /* Curtain wall linking the three towers, drawn first so the towers sit in front of it. */
+    c.beginPath(); rr(c,-sideX-sideW*.4,-.92*s,sideX*2+sideW*.8,.92*s,.05*s);
+    shp(c,'#aab3c6',lw,-.92*s,0,.10);
+    const bat=(sideX*2+sideW*.8)/7;
+    for(let i=0;i<7;i++){
+      c.beginPath(); rr(c,-sideX-sideW*.4+i*bat+.015*s,-1.06*s,bat-.05*s,.17*s,.02*s);
+      shp(c,'#c9d2e2',lw*.8,-1.06*s,-.89*s,.12);
+    }
+
+    /* Flanking towers. No plinth of their own — they stand on the shared one. */
+    for(const d of [-1,1]){
+      c.save(); c.translate(d*sideX,0);
+      towerShaft(c,s,lw,sideW,sideH,3,false);
+      /* Conical roof, so the silhouette is not three identical rectangles. */
+      c.beginPath(); c.moveTo(-sideW*.62,-sideH-.24*s); c.lineTo(sideW*.62,-sideH-.24*s);
+      c.lineTo(0,-sideH-.78*s); c.closePath(); shp(c,c1,lw,-sideH-.78*s,-sideH-.24*s,.24);
+      disc(c,0,-sideH-.82*s,.07*s,'#ffd24a',lw*.7);
+      c.restore();
+    }
+
+    /* Central hall. */
+    towerShaft(c,s,lw,keepW,keepH,5,false);
+
+    /* Gate. A door at the base is what makes a shape read as a building people live in. */
+    c.beginPath();
+    c.moveTo(-keepW*.20,0); c.lineTo(-keepW*.20,-.34*s);
+    c.quadraticCurveTo(0,-.56*s,keepW*.20,-.34*s); c.lineTo(keepW*.20,0); c.closePath();
+    shp(c,'#3b3f52',lw*.9,-.56*s,0,.06);
+
+    /* Banner. */
+    c.beginPath(); c.moveTo(-keepW*.26,-keepH*.78); c.lineTo(keepW*.26,-keepH*.78);
+    c.lineTo(keepW*.26,-keepH*.30); c.lineTo(0,-keepH*.42); c.lineTo(-keepW*.26,-keepH*.30); c.closePath();
+    shp(c,c1,lw,-keepH*.78,-keepH*.30);
+    c.fillStyle='rgba(255,255,255,.9)'; c.font='900 '+(.34*s)+'px "Lilita One",sans-serif';
+    c.textAlign='center'; c.textBaseline='middle';
+    c.fillText('♛',0,-keepH*.56);
+    c.beginPath(); rr(c,-keepW*.18,-keepH*.95,keepW*.36,.20*s,.04*s);
+    shp(c,'#2b3450',lw*.8,-keepH*.95,-keepH*.95+.20*s);
+
+    /* Crown. */
+    c.save(); c.translate(0,-keepH-.32*s);
+    c.beginPath(); c.moveTo(-.34*s,.12*s); c.lineTo(-.38*s,-.28*s); c.lineTo(-.15*s,-.08*s); c.lineTo(0,-.36*s);
+    c.lineTo(.15*s,-.08*s); c.lineTo(.38*s,-.28*s); c.lineTo(.34*s,.12*s); c.closePath();
+    shp(c,'#ffd24a',lw,-.36*s,.12*s,.3);
+    c.fillStyle='#e04a6a'; c.beginPath(); c.arc(0,-.02*s,.06*s,0,6.3); c.fill(); ols(c,lw*.6);
+    c.restore();
+
+    if(o.dmgFlash>0){
+      c.save(); c.beginPath(); rr(c,-span/2,-keepH-.3*s,span,keepH+.3*s,.08*s);
+      c.fillStyle='rgba(255,90,90,'+(o.dmgFlash*.55)+')'; c.fill(); c.restore();
+    }
+    return;
+  }
+
+  ell(c,0,.20*s,w*.66,w*.24,'rgba(0,0,0,.38)');
+  towerShaft(c,s,lw,w,h,4,true);
   c.beginPath(); c.moveTo(-w*.21,-h*.76); c.lineTo(w*.21,-h*.76); c.lineTo(w*.21,-h*.24);
   c.lineTo(0,-h*.36); c.lineTo(-w*.21,-h*.24); c.closePath(); shp(c,c1,lw,-h*.76,-h*.24);
   c.fillStyle='rgba(255,255,255,.85)'; c.font='900 '+(.34*s)+'px "Lilita One",sans-serif'; c.textAlign='center'; c.textBaseline='middle';
-  c.fillText(king?'♛':'✦',0,-h*.55);
+  c.fillText('✦',0,-h*.55);
   c.beginPath(); rr(c,-w*.15,-h*.94,w*.30,.20*s,.04*s); shp(c,'#2b3450',lw*.8,-h*.94,-h*.94+.20*s);
-  if(king){
-    c.save(); c.translate(0,-h-.30*s);
-    c.beginPath(); c.moveTo(-.34*s,.12*s); c.lineTo(-.38*s,-.28*s); c.lineTo(-.15*s,-.08*s); c.lineTo(0,-.36*s);
-    c.lineTo(.15*s,-.08*s); c.lineTo(.38*s,-.28*s); c.lineTo(.34*s,.12*s); c.closePath(); shp(c,'#ffd24a',lw,-.36*s,.12*s,.3);
-    c.fillStyle='#e04a6a'; c.beginPath(); c.arc(0,-.02*s,.06*s,0,6.3); c.fill(); ols(c,lw*.6); c.restore();
-  } else {
-    c.save(); c.translate(0,-h-.14*s);
-    c.beginPath(); rr(c,-.30*s,-.14*s,.60*s,.14*s,.05*s); shp(c,'#7a5228',lw,-.14*s,0);
-    c.beginPath(); rr(c,-.075*s,-.42*s,.15*s,.32*s,.05*s); shp(c,'#4a5468',lw,-.42*s,-.10*s);
-    disc(c,0,-.44*s,.10*s,c1,lw); c.restore();
-  }
+  c.save(); c.translate(0,-h-.14*s);
+  c.beginPath(); rr(c,-.30*s,-.14*s,.60*s,.14*s,.05*s); shp(c,'#7a5228',lw,-.14*s,0);
+  c.beginPath(); rr(c,-.075*s,-.42*s,.15*s,.32*s,.05*s); shp(c,'#4a5468',lw,-.42*s,-.10*s);
+  disc(c,0,-.44*s,.10*s,c1,lw); c.restore();
   if(o.dmgFlash>0){ c.save(); c.beginPath(); rr(c,-w/2,-h,w,h,.08*s); c.fillStyle='rgba(255,90,90,'+(o.dmgFlash*.55)+')'; c.fill(); c.restore(); }
 };
 
@@ -548,10 +687,67 @@ function renderPortrait(cv,cardId,size){
   Art.unit(c,card,{s:sc,t:performance.now()/1000,walk:0,atk:0});
   c.restore();
   c.fillStyle='rgba(0,0,0,.30)'; c.fillRect(0,H-Math.max(2,H*.05),W,H*.05);
-  c.strokeStyle='rgba(0,0,0,.55)'; c.lineWidth=Math.max(2,W*.035); c.strokeRect(c.lineWidth/2,c.lineWidth/2,W-c.lineWidth,H-c.lineWidth);
-  c.strokeStyle='rgba(255,255,255,.30)'; c.lineWidth=Math.max(1,W*.014); c.strokeRect(c.lineWidth*2,c.lineWidth*2,W-c.lineWidth*4,H-c.lineWidth*4);
+
+  /* ---- rarity foil ----
+     Epic and Legendary get a holographic sweep: two offset colour bands blended additively,
+     so the card catches light like real foil stock. Common and Rare deliberately do not — the
+     whole point of foil is that it marks the cards worth wanting, and a foil on everything is
+     a foil on nothing. The phase is derived from the card id rather than a clock so a grid of
+     cards does not pulse in unison like a row of Christmas lights. */
+  if(card.r==='epic'||card.r==='legendary'){
+    let h=0; for(let i=0;i<cardId.length;i++) h=(h*31+cardId.charCodeAt(i))>>>0;
+    const ph=(h%360)/360;
+    const legend=card.r==='legendary';
+    c.save();
+    c.globalCompositeOperation='lighter';
+    const fg=c.createLinearGradient(-W*ph,0,W*(1.6-ph),H);
+    if(legend){
+      fg.addColorStop(0,'rgba(0,0,0,0)');
+      fg.addColorStop(.34,'rgba(80,255,235,.30)');
+      fg.addColorStop(.50,'rgba(255,255,255,.42)');
+      fg.addColorStop(.66,'rgba(120,180,255,.28)');
+      fg.addColorStop(1,'rgba(0,0,0,0)');
+    } else {
+      fg.addColorStop(0,'rgba(0,0,0,0)');
+      fg.addColorStop(.40,'rgba(210,120,255,.26)');
+      fg.addColorStop(.55,'rgba(255,235,255,.32)');
+      fg.addColorStop(1,'rgba(0,0,0,0)');
+    }
+    c.fillStyle=fg; c.fillRect(0,0,W,H);
+    c.restore();
+  }
+
+  /* ---- frame ----
+     Three strokes read as bevelled metal: a dark seat, a bright top-left catch, and a soft
+     inner line. The rarity tints the metal so the card's tier is legible at thumbnail size,
+     which is the size it is nearly always seen at. */
+  const lwOuter=Math.max(2,W*.035);
+  c.strokeStyle='rgba(0,0,0,.6)'; c.lineWidth=lwOuter;
+  c.strokeRect(lwOuter/2,lwOuter/2,W-lwOuter,H-lwOuter);
+
+  const metal=c.createLinearGradient(0,0,W*.7,H);
+  metal.addColorStop(0,shade(rar.c,.62));
+  metal.addColorStop(.42,shade(rar.c,.06));
+  metal.addColorStop(.62,shade(rar.c,-.34));
+  metal.addColorStop(1,shade(rar.c,.30));
+  const lwMid=Math.max(1.4,W*.022);
+  c.strokeStyle=metal; c.lineWidth=lwMid;
+  c.strokeRect(lwOuter*.9+lwMid/2,lwOuter*.9+lwMid/2,W-lwOuter*1.8-lwMid,H-lwOuter*1.8-lwMid);
+
+  const lwIn=Math.max(1,W*.012);
+  c.strokeStyle='rgba(255,255,255,.34)'; c.lineWidth=lwIn;
+  c.strokeRect(lwOuter*1.5,lwOuter*1.5,W-lwOuter*3,H-lwOuter*3);
+
+  /* Legendary corner studs — small, but they make the card feel manufactured. */
+  if(card.r==='legendary'){
+    const r=Math.max(1.6,W*.026), pad=lwOuter*1.5+r*.6;
+    for(const [px,py] of [[pad,pad],[W-pad,pad],[pad,H-pad],[W-pad,H-pad]]){
+      c.beginPath(); c.arc(px,py,r,0,6.2832);
+      c.fillStyle=shade(rar.c,.55); c.fill();
+      c.lineWidth=Math.max(.8,W*.008); c.strokeStyle='rgba(0,0,0,.55)'; c.stroke();
+    }
+  }
 }
-/* ==== END VERBATIM SLICE ==== */
 
 export {
   shade, rr, ell, circ, limb, fitCanvas,

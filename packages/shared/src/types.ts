@@ -6,6 +6,15 @@ export type TargetKind = 'ground' | 'both' | 'build';
 export type ChestKey = 'wooden' | 'silver' | 'golden' | 'magical' | 'legend';
 export type ProjKind = 'arrow' | 'spear' | 'bullet' | 'fire' | 'ball' | 'spit' | 'lightning';
 
+/**
+ * Graphics preset.
+ *
+ * `low` targets phones that cannot afford an offscreen bloom pass; `high` turns everything on.
+ * Stored on the save rather than in device storage so a player's choice follows them, and so
+ * support can see what a bug report was rendered with.
+ */
+export type Quality = 'low' | 'med' | 'high';
+
 export interface Rarity {
   k: RarityKey;
   n: string;
@@ -152,6 +161,8 @@ export interface SaveState {
    * increments neither counter (L2943-2944), so a drawn first match would replay the tutorial.
    */
   tutorialDone: boolean;
+  /** Graphics preset. Absent on old saves ⇒ 'high', then auto-degraded at runtime. */
+  quality: Quality;
 }
 
 /* ------------------------------------------------------------------ simulation */

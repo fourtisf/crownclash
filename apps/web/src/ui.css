@@ -117,3 +117,113 @@
 @media (prefers-reduced-motion: reduce) {
   .coach-target { animation: none }
 }
+
+/* ---------------------------------------------------------------- graphics preset */
+
+.qlabel {
+  font-size: 9px;
+  letter-spacing: 1.8px;
+  font-weight: 800;
+  color: #8f9ecb;
+  text-align: left;
+  margin: 4px 0 5px;
+}
+
+.qrow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.qbtn {
+  font-family: 'Lilita One', cursive;
+  font-size: 12px;
+  letter-spacing: .5px;
+  padding: 9px 4px 10px;
+  cursor: pointer;
+  color: #cdd7f2;
+  border: 2.5px solid var(--ink);
+  border-radius: 11px;
+  background: linear-gradient(180deg, #2a3d7d, #14204f);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, .18), 0 3px 0 var(--ink);
+}
+.qbtn:active { transform: translateY(3px); box-shadow: inset 0 2px 0 rgba(255,255,255,.15), 0 0 0 var(--ink) }
+.qbtn.on {
+  color: #4a2a04;
+  background: linear-gradient(180deg, var(--gold-1), var(--gold) 46%, var(--gold-2) 62%, var(--gold-3));
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, .5), 0 3px 0 var(--ink);
+}
+
+/* ---------------------------------------------------------------- card art visibility */
+
+/*
+ * PROTOTYPE BUG FIX.
+ *
+ * `cardNode()` (crown-clash.html L2589-2606) nests the portrait canvas inside `.frame`, which
+ * `styles.css` declares `position:absolute; inset:0`. Absolutely-positioned children
+ * contribute no height, so `.ccard` collapsed to zero and every card in BATTLE DECK and
+ * COLLECTION rendered as a flat black bar — the card art was invisible in the two screens
+ * whose entire purpose is showing it. Verified against the unmodified prototype: identical.
+ *
+ * The battle hand escapes this because `renderHand()` appends its canvas directly to `.hcard`,
+ * where `aspect-ratio` on the canvas can do its job.
+ *
+ * Fixing it here rather than in styles.css keeps that file a verbatim slice, and giving the
+ * *container* the ratio leaves the prototype's DOM untouched.
+ */
+.ccard { aspect-ratio: 1 / 1.05 }
+.ccard .frame { display: block }
+
+/*
+ * PROTOTYPE BUG FIX (second half of the collapsed-card problem).
+ *
+ * `.lv` in styles.css is `position:absolute; inset:0` with a 58% dark veil and 22px centred
+ * text — it covers the *entire* card. It is used for two different things: the padlock on an
+ * unowned card (where a full veil is exactly right) and the level readout on an owned one
+ * (where it buries the artwork completely).
+ *
+ * That was invisible while `.ccard` had zero height. With the cards actually rendering, an
+ * owned card was 60% dark with "Lv 1" printed across the middle of the character. Since
+ * `cardNode()` already marks unowned cards `.locked`, the two cases can finally be told apart:
+ * keep the veil for the padlock, and turn the level into a badge along the bottom edge — which
+ * is what `.lvlbadge` already does for the same information elsewhere in the app.
+ */
+.ccard:not(.locked) .lv {
+  inset: auto 0 0 0;
+  display: block;
+  padding: 2px 0 3px;
+  font-family: 'Baloo 2', sans-serif;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .3px;
+  line-height: 1.25;
+  text-align: center;
+  color: #fff2cd;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .35), rgba(0, 0, 0, .78));
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .7);
+}
+/* Ready to upgrade: the badge goes gold so it reads at a glance across a full collection. */
+.ccard:not(.locked) .lv.up {
+  color: #4a2a04;
+  background: linear-gradient(180deg, var(--gold-1), var(--gold) 55%, var(--gold-2));
+}
+
+/*
+ * The fill-progress sliver sits just above the level badge instead of floating across the
+ * middle of the artwork. Translucent rather than the stylesheet's opaque #0a1030: at zero
+ * copies collected — which is every card on a new account — an opaque track reads as a black
+ * bar stamped over the character.
+ */
+.ccard .prog {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 16px;
+  height: 4px;
+  margin: 0;
+  border: 1px solid rgba(0, 0, 0, .55);
+  border-radius: 3px;
+  background: rgba(6, 10, 28, .45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .5);
+}

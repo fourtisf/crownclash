@@ -12,10 +12,10 @@ import { S, boot, onSaveChange, refresh, setSave } from './api/store';
 import { initBattle, sizeArena, startBattle, stopBattle } from './battle';
 import { $, $$, must } from './dom';
 import { Snd, setSfxEnabled } from './engine';
-import { bindModals } from './ui/modal';
+import { bindModals, closeModal, openModal } from './ui/modal';
 import { toastTop } from './ui/toast';
 import { markDots, setTab } from './ui/tabs';
-import { drawMiniArena, initLanding, refreshHeader } from './screens/home';
+import { drawMiniArena, initLanding, refreshHeader, renderChests } from './screens/home';
 import { findMatch } from './screens/matchmaking';
 import { showResult } from './screens/result';
 import type { DeployLogEntry } from '@crown/shared';
@@ -72,8 +72,7 @@ async function flushQueue(): Promise<void> {
 
 /** L2998-3009 — first-run explainer. */
 function welcome(): void {
-  import('./ui/modal').then(({ openModal, closeModal }) => {
-    openModal(
+  openModal(
       '<h2 class="goldtext">CROWN CLASH</h2><p class="sub">Real-time arena battler</p>' +
         '<div style="font-size:12.5px;color:#c3cdec;font-weight:700;line-height:1.75;padding:0 4px">' +
         '<div>⚡ <b>Elixir</b> isi ulang otomatis — maks 10.</div>' +
@@ -82,11 +81,10 @@ function welcome(): void {
         '<div>⏱️ 3 menit. Menit terakhir elixir jadi <b>2×</b>.</div>' +
         '<div>🎁 Win chests → collect cards → level them up.</div>' +
         '</div>' +
-        '<button class="btn gold big" id="wGo" style="width:100%;margin-top:14px">GO!</button>',
-    );
-    const go2 = $('#wGo');
-    if (go2) go2.onclick = () => closeModal();
-  });
+      '<button class="btn gold big" id="wGo" style="width:100%;margin-top:14px">GO!</button>',
+  );
+  const go2 = $('#wGo');
+  if (go2) go2.onclick = () => closeModal();
 }
 
 async function init(): Promise<void> {
@@ -142,7 +140,7 @@ async function init(): Promise<void> {
   setInterval(() => {
     const active = $$('.navbtn.on')[0];
     if (active && active.dataset.tab === 'home') {
-      void import('./screens/home').then((m) => m.renderChests());
+      renderChests();
     }
     markDots();
   }, 30000);

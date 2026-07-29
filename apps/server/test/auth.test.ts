@@ -226,6 +226,37 @@ describe('wallet link — Solana', () => {
     expect((await anon.get('/api/auth/me')).statusCode).toBe(200);
   });
 
+  it('reuses the wallet-first account after unlink and a re-sign from a clean browser', async () => {
+    const anon = new Agent(rig.app);
+    const wallet = new SolanaWallet();
+
+    const c1 = await challenge(anon, wallet.address, 'solana');
+    const created = json<WalletLinkResponse>(
+      await anon.post('/api/auth/wallet/link', {
+        address: wallet.address, kind: 'solana', signature: wallet.sign(c1.message), message: c1.message,
+      }),
+    );
+    const userId = json<AuthResponse>(await anon.get('/api/auth/me')).userId;
+    void created;
+
+    // Give the account progress, then unlink — `User.wallet` goes null but the synthetic
+    // device id stays, so a naive re-link would collide on it.
+    const cur = (await rig.store.getSave(userId))!.json;
+    await rig.store.putSave(userId, { ...cur, trophies: 555, gold: 7777 });
+    await anon.post('/api/auth/wallet/unlink');
+
+    const clean = new Agent(rig.app);
+    const c2 = await challenge(clean, wallet.address, 'solana');
+    const res = await clean.post('/api/auth/wallet/link', {
+      address: wallet.address, kind: 'solana', signature: wallet.sign(c2.message), message: c2.message,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = json<WalletLinkResponse>(res);
+    expect(body.save.trophies).toBe(555);
+    expect(body.save.gold).toBe(7777);
+    expect(json<AuthResponse>(await clean.get('/api/auth/me')).userId).toBe(userId);
+  });
+
   it('returns walletTaken when the current account has progress that would be lost', async () => {
     const owner = await guest(rig.app, 'device-solana-04');
     const wallet = new SolanaWallet();

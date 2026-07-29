@@ -205,7 +205,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (!user) {
         // Wallet-first: no cookie ever existed on this browser. The synthetic device id keeps
         // `deviceId` NOT NULL without pretending a device we never saw.
-        user = await store.createUser({ deviceId: `wallet:${kind}:${wallet}`, save: defaultState() });
+        //
+        // Reused rather than blindly created, because unlinking clears `User.wallet` but not
+        // `deviceId`: a wallet-first player who unlinks and later signs in again from a clean
+        // browser is no longer findable by wallet, and creating a second row would both
+        // collide on the unique index and strand their save.
+        const deviceId = `wallet:${kind}:${wallet}`;
+        user = (await store.userByDeviceId(deviceId)) ?? (await store.createUser({ deviceId, save: defaultState() }));
       }
 
       if (user.wallet !== wallet || !user.airdropEligible) {

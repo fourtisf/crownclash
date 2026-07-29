@@ -76,7 +76,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       // Shared across PM2 instances when Redis is real; per-process otherwise (see redis.ts).
       redis: redis.raw ?? undefined,
       keyGenerator: (req: FastifyRequest) => req.userId ?? req.ip,
-      errorResponseBuilder: (_req, context): ApiError => ({
+      // `statusCode` is part of the shape @fastify/rate-limit expects; the rest is our
+      // `ApiError` so the client sees one error format everywhere.
+      errorResponseBuilder: (_req, context): ApiError & { statusCode: number } => ({
+        statusCode: 429,
         error: API_ERRORS.rateLimited,
         message: `too many requests; retry in ${Math.ceil(context.ttl / 1000)}s`,
         retryAfter: Math.ceil(context.ttl / 1000),
@@ -86,6 +89,15 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
 
   app.setErrorHandler((err: FastifyError, req, reply) => {
     if (err instanceof HttpError) return sendError(reply, err);
+    // @fastify/rate-limit *throws* its response body once a custom error handler exists, so
+    // without this branch every 429 would be reported to the client as a 500 and no client
+    // could back off correctly.
+    const limited = err as unknown as Partial<ApiError>;
+    if (limited.error === API_ERRORS.rateLimited) {
+      return reply
+        .status(429)
+        .send({ error: API_ERRORS.rateLimited, message: limited.message, retryAfter: limited.retryAfter } satisfies ApiError);
+    }
     // Fastify's own 4xx (body too large, malformed JSON, unsupported media type).
     const status = typeof err.statusCode === 'number' ? err.statusCode : 500;
     if (status >= 400 && status < 500) {

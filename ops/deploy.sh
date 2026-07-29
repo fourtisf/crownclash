@@ -210,16 +210,19 @@ rollback() {
   ROLLING_BACK=1
   warn "deploy failed — rolling back to $PREV_SHA"
 
+  # Every step here is guarded: the ERR trap is not inherited by functions, so an unguarded
+  # failure inside the rollback would exit the shell silently and leave the operator with no
+  # idea how far it got.
   if [ -n "$PREV_RELEASE" ] && [ -d "$PREV_RELEASE" ]; then
     log "restoring static release $PREV_RELEASE"
-    point_current_at "$PREV_RELEASE"
+    point_current_at "$PREV_RELEASE" || warn "could not restore the static symlink"
   else
     warn "no previous static release to restore"
   fi
 
   # Detach rather than reset the branch: the branch pointer stays where the remote says it is,
   # so the next deploy is an ordinary fast-forward instead of a divergence to untangle.
-  git checkout -q --force --detach "$PREV_SHA"
+  git checkout -q --force --detach "$PREV_SHA" || warn "could not check out $PREV_SHA"
   # Migrations are deliberately not reverted (see the file header).
   RUN_MIGRATE=0
   if build_and_reload && health; then

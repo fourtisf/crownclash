@@ -128,6 +128,23 @@ describe('Phase 2 matchmaking window', () => {
   });
 });
 
+describe('Phase 2 websocket scaffold', () => {
+  it('registers /ws without disturbing the HTTP API', async () => {
+    // The requirement for the scaffold is that it compiles and does not destabilise the api
+    // process, so this asserts exactly that: the upgrade route exists, ordinary routes still
+    // answer, and shutdown stops the matchmaking interval cleanly.
+    app = await buildApp({ store: new MemoryStore(), redis: memoryRedis(), rateLimit: false, websocket: true });
+    await app.ready();
+
+    expect(app.hasRoute({ method: 'GET', url: '/ws' })).toBe(true);
+    const health = await app.inject({ method: 'GET', url: '/api/health' });
+    expect(health.statusCode).toBe(200);
+
+    await app.close();
+    app = null;
+  });
+});
+
 describe('error shape', () => {
   it('renders unknown routes and unauthorised calls as ApiError', async () => {
     const a = await limitedApp();

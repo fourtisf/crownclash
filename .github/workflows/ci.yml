@@ -1,0 +1,75 @@
+# Crown Clash CI.
+#
+# One job on purpose. The install is the expensive step and every gate below needs the same
+# node_modules, so splitting into parallel jobs would pay for it three more times to save
+# nothing — the whole run is a couple of minutes.
+#
+# Step order is the point of this file. The verbatim-slice check runs FIRST, before typecheck
+# and before tests, because it is the only gate that can fail for a reason none of the others
+# would ever notice: `apps/web/src/{art,render,arenaBg,sound}.ts` and `styles.css` are sliced
+# byte-for-byte out of reference/crown-clash.html by tools/extract.mjs, and the whole port rests
+# on the claim that the shipped game *is* the approved prototype. A hand-edit to one of those
+# files typechecks fine, tests fine, and quietly makes that claim false. Failing in 10 seconds
+# with "the art no longer matches the prototype" is worth more than a green tick 3 minutes later.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A new push to the same ref makes the in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # corepack otherwise asks for confirmation the first time it downloads the pinned pnpm.
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Before setup-node, so `cache: pnpm` below can find a pnpm binary to ask for the store
+      # path. corepack takes the exact version from package.json's `packageManager` field, so
+      # CI and the VPS resolve dependencies with the same pnpm.
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # Keys the pnpm content-addressable store on pnpm-lock.yaml.
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # ---- the gate that matters most -----------------------------------------------------
+      - name: Verbatim slices still match the prototype
+        run: node tools/extract.mjs --check
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      # packages/shared: sim determinism (same seed + log ⇒ same result hash), full-match and
+      # overtime paths, economy, and the data-parity diff that pins every constant in data.ts to
+      # the HTML. apps/server: match validation. apps/web: FX event replay.
+      # Playwright lives behind a separate `e2e` script and is deliberately not run here — it
+      # needs browsers and a live server, which belongs in its own workflow.
+      - name: Test
+        run: pnpm -r test
+
+      - name: Build (shared, server, web)
+        run: pnpm -r build

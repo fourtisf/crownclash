@@ -16,7 +16,7 @@ import type {
   LeaderboardRow, MatchCompleteInput, MatchCreateInput, MatchRow, NonceRow, SavePutMeta, SaveRow,
   Store, UserRow,
 } from './store.js';
-import { WalletConflictError } from './store.js';
+import { SaveConflictError, WalletConflictError } from './store.js';
 
 const toUser = (u: DbUser): UserRow => ({
   id: u.id,
@@ -35,6 +35,7 @@ const toSave = (s: DbSave): SaveRow => ({
   migrated: s.migrated,
   sanitizeFlags: s.sanitizeFlags ?? [],
   updatedAt: s.updatedAt,
+  version: s.version ?? 0,
 });
 
 const toMatch = (m: DbMatch): MatchRow => ({
@@ -152,6 +153,19 @@ export class PrismaStore implements Store {
     }
     if (meta.sanitizeFlags !== undefined) update.sanitizeFlags = meta.sanitizeFlags;
 
+    // Compare-and-set path: one conditional UPDATE, so the database decides the winner. A
+    // read-then-write in application code would reintroduce exactly the race this closes.
+    if (meta.expectedVersion !== undefined) {
+      const res = await db.save.updateMany({
+        where: { userId, version: meta.expectedVersion },
+        data: { ...update, version: { increment: 1 } },
+      });
+      if (res.count === 0) throw new SaveConflictError();
+      const row = await db.save.findUnique({ where: { userId } });
+      if (!row) throw new SaveConflictError();
+      return toSave(row);
+    }
+
     const s = await db.save.upsert({
       where: { userId },
       create: {
@@ -163,7 +177,7 @@ export class PrismaStore implements Store {
         migratedAt: meta.migrated ? new Date() : null,
         sanitizeFlags: meta.sanitizeFlags ?? [],
       },
-      update,
+      update: { ...update, version: { increment: 1 } },
     });
     return toSave(s);
   }

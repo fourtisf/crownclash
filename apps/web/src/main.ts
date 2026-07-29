@@ -131,7 +131,8 @@ async function init(): Promise<void> {
   if (result.migrated) toastTop('Local progress imported');
   if (!S.seen) {
     S.seen = true;
-    void api.updateProfile({}).catch(() => undefined);
+    // Persist the dismissal server-side so the explainer does not reappear on another device.
+    void api.updateProfile({ seen: true }).catch(() => undefined);
     setTimeout(welcome, 300);
   }
   if (result.online) void flushQueue();

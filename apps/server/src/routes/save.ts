@@ -27,10 +27,17 @@ const profileSchema = z
     avatar: z.string().min(1).max(8).optional(),
     sfx: z.boolean().optional(),
     deck: z.array(z.string()).length(8).optional(),
+    seen: z.boolean().optional(),
   })
-  .refine((v) => v.name !== undefined || v.avatar !== undefined || v.sfx !== undefined || v.deck !== undefined, {
-    message: 'no fields to update',
-  });
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.avatar !== undefined ||
+      v.sfx !== undefined ||
+      v.deck !== undefined ||
+      v.seen !== undefined,
+    { message: 'no fields to update' },
+  );
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const res = schema.safeParse(body);
@@ -49,9 +56,7 @@ export async function saveRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/save', { preHandler: requireUser, config: limit(LIMITS.read) }, async (req): Promise<SaveResponse> => {
     const user = await requireUserRow(store, req);
-    const { save, dirty } = await loadSave(store, user);
-    if (dirty) await persistSave(store, user.id, save);
-    return { save };
+    return { save: await repairSave(store, user) };
   });
 
   app.post(
@@ -66,7 +71,7 @@ export async function saveRoutes(app: FastifyInstance): Promise<void> {
         throw conflict(SERVER_ERRORS.alreadyMigrated, 'this account has already imported a local save');
       }
 
-      const { save: current } = await loadSave(store, user);
+      const { save: current, version } = await loadSave(store, user);
       if (hasProgress(current)) {
         // Importing over real progress is indistinguishable from overwriting it, and the
         // client only ever calls this on first login. Anything else is a bug or an attack.
@@ -88,7 +93,15 @@ export async function saveRoutes(app: FastifyInstance): Promise<void> {
       ensurePlayableDeck(save);
 
       if (flags.length) req.log.warn({ userId: user.id, flags }, 'save migration clamped values');
-      const persisted = await persistSave(store, user.id, save, { migrated: true, sanitizeFlags: flags });
+      // Compare-and-set rather than a retry: this endpoint *replaces* the save, so re-running
+      // it against a document somebody else just wrote would discard whatever they wrote. Two
+      // simultaneous migrations therefore end as one import and one 409, which is also what
+      // closes the read-then-check gap on `migrated` above.
+      const persisted = await persistSave(store, user.id, save, {
+        migrated: true,
+        sanitizeFlags: flags,
+        expectedVersion: version,
+      });
       return { save: persisted, flags: flags.length ? flags : undefined };
     },
   );
@@ -113,6 +126,9 @@ export async function saveRoutes(app: FastifyInstance): Promise<void> {
         save.avatar = body.avatar;
       }
       if (body.sfx !== undefined) save.sfx = body.sfx;
+      // One-way: the first-run explainer can be dismissed but not un-dismissed, so a stale
+      // client cannot make it reappear for someone who has already played.
+      if (body.seen === true) save.seen = true;
       if (body.deck !== undefined) {
         const deck = validateDeck(save, body.deck);
         if (!deck) throw badRequest(SERVER_ERRORS.invalidDeck, 'deck must be 8 distinct owned cards');

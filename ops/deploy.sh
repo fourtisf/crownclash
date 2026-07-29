@@ -37,6 +37,7 @@ Environment (all optional, shown with their defaults):
   ENV_FILE=/etc/crown-clash/app.env secrets; sourced, never printed
   WEB_ROOT=/var/www/crown-clash     static releases + the `current` symlink nginx serves
   KEEP_RELEASES=5
+  SCHEMA=$APP_DIR/prisma/schema.prisma
   CROWN_LOG_DIR=/var/log/crown-clash
   HEALTH_URL=http://127.0.0.1:8080/api/health
   HEALTH_RETRIES=30  HEALTH_DELAY=2
@@ -63,6 +64,7 @@ HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
 HEALTH_DELAY="${HEALTH_DELAY:-2}"
 
 PM2="${PM2:-pm2}"
+SCHEMA="${SCHEMA:-$APP_DIR/prisma/schema.prisma}"
 TARGET_REF=""
 RUN_MIGRATE=1
 
@@ -153,7 +155,7 @@ health() {
 }
 
 build_and_reload() {
-  if [ "$RUN_MIGRATE" -eq 1 ] && [ ! -d prisma/migrations ]; then
+  if [ "$RUN_MIGRATE" -eq 1 ] && [ ! -d "$(dirname "$SCHEMA")/migrations" ]; then
     warn "prisma/migrations does not exist in this checkout."
     warn "Create the initial migration locally and commit it (docs/DEPLOY.md § Migrations),"
     warn "or re-run with --no-migrate if the schema is managed some other way."
@@ -175,12 +177,19 @@ build_and_reload() {
   log "building workspace"
   pnpm -r build
 
+  # Prisma is driven from apps/server, not from the repo root, even though the schema lives at
+  # the root. `prisma generate` has to resolve `@prisma/client` to know where to write the
+  # generated client, and under pnpm's strict layout that package is a dependency of
+  # apps/server only — it is not resolvable from the root, so the root `db:generate` script
+  # fails. (apps/server/src/lib/prisma.ts documents the same constraint from the other side.
+  # Adding @prisma/client to the root package.json would make the root script work; until then
+  # this is the form that actually runs.)
   log "generating prisma client"
-  pnpm run db:generate
+  pnpm --filter @crown/server exec prisma generate --schema "$SCHEMA"
 
   if [ "$RUN_MIGRATE" -eq 1 ]; then
     log "applying database migrations"
-    pnpm run db:migrate
+    pnpm --filter @crown/server exec prisma migrate deploy --schema "$SCHEMA"
   else
     warn "skipping migrations (--no-migrate)"
   fi

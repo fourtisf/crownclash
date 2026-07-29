@@ -55,6 +55,11 @@ model Save {
   trophies Int @default(0)
   best     Int @default(0)
 
+  /// Optimistic-concurrency counter. Writes that pass `expectedVersion` become a conditional
+  /// UPDATE ... WHERE version = ?, so two overlapping economy requests cannot each write a
+  /// full document derived from the same read and silently drop one another's changes.
+  version Int @default(0)
+
   /// One-time local-save import (handoff §3.2). Once true, `/api/save/migrate` refuses.
   migrated   Boolean   @default(false)
   migratedAt DateTime?

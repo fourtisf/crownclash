@@ -30,7 +30,7 @@ import {
 import { requireUser } from '../lib/auth.js';
 import { HttpError, SERVER_ERRORS, badRequest, unauthorized } from '../lib/errors.js';
 import { LIMITS, limit } from '../lib/ratelimit.js';
-import { loadSave, persistSave } from '../lib/saves.js';
+import { loadSave, mutateSave, repairSave } from '../lib/saves.js';
 import { RKEY } from '../lib/redis.js';
 import type { MatchRow, Store, UserRow } from '../lib/store.js';
 
@@ -159,7 +159,6 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
 
       const cfg = match.config;
       const deployLog = body.deployLog as DeployLogEntry[];
-      const { save } = await loadSave(store, user);
 
       const voided = async (reason: string): Promise<MatchFinishResponse> => {
         req.log.warn({ userId: user.id, matchId: match.id, reason }, 'match voided');
@@ -170,6 +169,10 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
           validated: false,
           voidReason: reason,
         });
+        // `repairSave` rather than a bare `loadSave`: loading rolls the day's quests, and
+        // handing the client a quest set that was never stored would leave it showing three
+        // quests the next `GET /api/save` replaces with three different ones.
+        const save = await repairSave(store, user);
         return { result: 'draw', crowns: [0, 0], rewards: noRewards(save.trophies), save, voided: { reason } };
       };
 
@@ -191,8 +194,14 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
       // Rewards roll off their own seed. Off the match seed the client could compute its win
       // chest before deciding whether to submit at all.
       const rewardSeed = randomSeed();
-      const rewards = applyMatchRewards(new Rng(rewardSeed), save, result, sim.state.stat);
-      const persisted = await persistSave(store, user.id, save);
+      // Compare-and-set, because the payout is the most expensive thing on this save to lose:
+      // a deck edit or a chest open in flight would otherwise write back a document read before
+      // the match ended and silently erase trophies the player was just told they had won.
+      // The `Rng` is built *inside* the closure so a retry replays the identical roll — the
+      // reward must not change because an unrelated request happened to overlap.
+      const { result: rewards, save: persisted } = await mutateSave(store, user, (s) =>
+        applyMatchRewards(new Rng(rewardSeed), s, result, sim.state.stat),
+      );
 
       await store.completeMatch(match.id, {
         deployLog,

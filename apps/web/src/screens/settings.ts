@@ -57,20 +57,47 @@ export function openSettings(): void {
     };
   });
 
-  // Dismissing without saving must not leave the drafted avatar in the header.
-  m.querySelectorAll<HTMLElement>('[data-close]').forEach((b) => {
-    const prev = b.onclick;
-    b.onclick = (ev) => {
-      if (prev) prev.call(b, ev);
-      refreshHeader();
-    };
+  /**
+   * `{ avatar }` only when the player actually picked one of the ten, otherwise `{}`.
+   *
+   * The server rejects any avatar outside `PROFILE_AVATARS` with `invalid_profile`
+   * (`routes/save.ts` L119), but `sanitizeSave` only length-caps the field — so a save that
+   * arrived through `/save/migrate` can legitimately hold an emoji the modal does not offer.
+   * Echoing it back would 400 and make the whole modal unusable: SAVE would fail even when
+   * all the player wanted was to change their name. `draftAvatar` moves only through
+   * `previewAvatar`, which is wired to the ten buttons and nothing else, so "differs from
+   * `S.avatar`" is exactly "came from this modal".
+   */
+  const avatarPatch = (): ProfileUpdateRequest =>
+    draftAvatar === S.avatar ? {} : { avatar: draftAvatar };
+
+  // Dismissing without saving must not leave the drafted avatar in the header. Watching the
+  // overlay covers every exit — ✕, the backdrop, and a programmatic `closeModal()` — where
+  // wrapping the `[data-close]` buttons only covered ✕ and left a backdrop-dismissed preview
+  // showing an avatar the account does not have. The observer disconnects itself on the first
+  // close, so repeated visits do not stack watchers on a long-lived element (see B1).
+  const ovl = must('#ovl');
+  const nameBox = must<HTMLInputElement>('#stName');
+  const watcher = new MutationObserver(() => {
+    // `nameBox.isConnected` is what makes this reliable across the SFX toggle, which does
+    // `closeModal(); openSettings();` inside one task: the observer callback is a microtask,
+    // so by the time it runs the overlay is `.on` again and a class check alone would never
+    // fire — leaving this watcher observing forever while the reopened modal added another.
+    // The old modal's input is detached by then, which is the unambiguous signal.
+    if (nameBox.isConnected && ovl.classList.contains('on')) return;
+    watcher.disconnect();
+    refreshHeader();
   });
+  watcher.observe(ovl, { attributes: true, attributeFilter: ['class'] });
 
   const sfx = must<HTMLButtonElement>('#stSfx');
   sfx.onclick = async () => {
     sfx.disabled = true;
     try {
-      const res = await api.updateProfile({ sfx: !S.sfx });
+      // The avatar draft rides along. The prototype wrote `S.avatar` the moment a face was
+      // tapped, so toggling SUARA (which reopens the modal) kept the choice; sending only
+      // `sfx` would reopen against the server's untouched avatar and silently discard it.
+      const res = await api.updateProfile({ sfx: !S.sfx, ...avatarPatch() });
       setSave(res.save);
       setSfxEnabled(res.save.sfx);
       // L2944 — the prototype reopened the modal to repaint the button; same here.
@@ -84,10 +111,17 @@ export function openSettings(): void {
 
   const save = must<HTMLButtonElement>('#stSave');
   save.onclick = async () => {
-    const v = must<HTMLInputElement>('#stName').value.trim();
-    const req: ProfileUpdateRequest = { avatar: draftAvatar };
+    const v = nameBox.value.trim();
+    const req: ProfileUpdateRequest = avatarPatch();
     // L2945 — an empty box keeps the current name rather than clearing it.
     if (v) req.name = v;
+    // The route refuses an empty patch (`no fields to update`). Nothing to change here means
+    // the prototype's SAVE was a no-op too — close and go home rather than toast a failure.
+    if (req.name === undefined && req.avatar === undefined) {
+      closeModal();
+      setTab('home');
+      return;
+    }
     save.disabled = true;
     try {
       const res = await api.updateProfile(req);

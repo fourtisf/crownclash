@@ -1,11 +1,27 @@
 {
+  // `include` is deliberately just `src`.
+  //
+  // Widening it to `test/**/*.ts` pulls in test/e2e/server.ts, which imports
+  // ../../../server/src/app.js to boot a real Fastify instance — and that drags all of
+  // apps/server into this program without apps/server's own tsconfig. Two things then break:
+  // apps/server/src/fastify.d.ts (which augments FastifyInstance with `store`/`redis` and
+  // FastifyRequest with `userId`) is not part of this project, so every use of those
+  // decorators becomes TS2339; and @types/node is not resolvable from apps/web at all, so the
+  // config files only typecheck by accident, on declarations the server happened to drag in.
+  // The result is ~24 errors in files this package does not own and a red `pnpm -r typecheck`.
+  //
+  // Server code is typechecked by apps/server/tsconfig.json, which has the ambient
+  // declarations and the node types. This project checks the client.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "noEmit": true,
+    "declaration": false,
     "allowJs": false,
+    // Mirrors the alias in vite.config.ts and vitest.config.ts so the editor, the typechecker,
+    // the test runner and the bundler all resolve the shared game to the same source file.
     "paths": { "@crown/shared": ["../../packages/shared/src/index.ts"] }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "*.config.ts"]
+  "include": ["src"]
 }

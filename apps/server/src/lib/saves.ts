@@ -16,7 +16,7 @@
 import {
   Rng, STARTER_DECK, checkQuests, defaultState, normalizeSave, randomSeed, CARD, type SaveState,
 } from '@crown/shared';
-import type { SavePutMeta, Store, UserRow } from './store.js';
+import { SaveConflictError, type SavePutMeta, type Store, type UserRow } from './store.js';
 
 /** L2928 — the ten emoji the prototype's profile modal offers. Not in `data.ts`; UI-only. */
 export const PROFILE_AVATARS: readonly string[] = ['👑', '⚔️', '🛡️', '🐉', '🔥', '💀', '🦁', '🧙', '🏹', '⚡'];
@@ -28,6 +28,8 @@ export interface LoadedSave {
   save: SaveState;
   /** True when the load itself changed something worth writing back (quest roll, identity). */
   dirty: boolean;
+  /** Version the save was read at, for the compare-and-set on write. 0 when no row existed. */
+  version: number;
 }
 
 /**
@@ -76,7 +78,7 @@ export async function loadSave(store: Store, user: UserRow): Promise<LoadedSave>
     save.walletKind = user.walletKind;
     dirty = true;
   }
-  return { save, dirty };
+  return { save, dirty, version: row?.version ?? 0 };
 }
 
 export async function persistSave(
@@ -89,16 +91,66 @@ export async function persistSave(
   return row.json;
 }
 
-/** Load, mutate, write — the shape almost every economy route wants. */
+/**
+ * Load, mutate, write — with the read-modify-write made safe against concurrent requests.
+ *
+ * Every economy route reads the whole save, changes a few fields in JS and writes the whole
+ * document back. Two of those overlapping (claim a quest while an upgrade is in flight) each
+ * compute their result from the same starting document, and the second write erases the
+ * first — a player loses gold, or gets a level without paying for it. The write is therefore
+ * a compare-and-set on `version`, and a losing writer re-reads and re-applies rather than
+ * clobbering.
+ *
+ * `fn` must be a pure function of the save it is handed: it is called again from scratch on
+ * every retry, so anything it does outside the save (issuing a chest, spending a nonce) would
+ * happen more than once. Routes that need such a side effect roll it *before* calling here and
+ * pass the outcome in.
+ *
+ * `MAX_ATTEMPTS` is small deliberately. Contention on a single player's save is a double-tap,
+ * not a thundering herd; if four attempts in a row lose, something is wrong and a 409 is a
+ * more honest answer than spinning.
+ */
+const MAX_ATTEMPTS = 4;
+
 export async function mutateSave<T>(
   store: Store,
   user: UserRow,
   fn: (save: SaveState) => T | Promise<T>,
 ): Promise<{ result: T; save: SaveState }> {
-  const { save } = await loadSave(store, user);
-  const result = await fn(save);
-  const persisted = await persistSave(store, user.id, save);
-  return { result, save: persisted };
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const { save, version } = await loadSave(store, user);
+    const result = await fn(save);
+    try {
+      const persisted = await persistSave(store, user.id, save, { expectedVersion: version });
+      return { result, save: persisted };
+    } catch (err) {
+      if (!(err instanceof SaveConflictError)) throw err;
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Write back only what the *load* itself repaired — a rolled-over quest set, a patched deck, a
+ * re-stamped wallet — and nothing else.
+ *
+ * Used by the read paths (`GET /api/save`, `/auth/me`, the voided-match response). These must
+ * still be compare-and-set, or a slow read would republish a stale document over a payout that
+ * landed in between. Losing the race is not an error here: the winner also went through
+ * `loadSave`, so its document already carries the same repair. Its version is simply newer, so
+ * it wins and we return it.
+ */
+export async function repairSave(store: Store, user: UserRow): Promise<SaveState> {
+  const { save, dirty, version } = await loadSave(store, user);
+  if (!dirty) return save;
+  try {
+    return await persistSave(store, user.id, save, { expectedVersion: version });
+  } catch (err) {
+    if (!(err instanceof SaveConflictError)) throw err;
+    return (await loadSave(store, user)).save;
+  }
 }
 
 /**

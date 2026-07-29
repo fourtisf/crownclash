@@ -25,7 +25,7 @@ import {
 import { requireUser } from '../lib/auth.js';
 import { HttpError, SERVER_ERRORS, badRequest, unauthorized } from '../lib/errors.js';
 import { LIMITS, limit } from '../lib/ratelimit.js';
-import { loadSave, persistSave, serverRng } from '../lib/saves.js';
+import { mutateSave, serverRng } from '../lib/saves.js';
 import type { Store, UserRow } from '../lib/store.js';
 
 const chestSchema = z.object({
@@ -62,8 +62,12 @@ export async function economyRoutes(app: FastifyInstance): Promise<void> {
     async (req): Promise<ChestOpenResponse> => {
       const body = parse(chestSchema, req.body);
       const user = await requireUserRow(store, req);
-      const { save } = await loadSave(store, user);
 
+      // The roll happens inside the mutation on purpose. A retry discards the losing attempt's
+      // save wholesale, so its chest is discarded with it — what gets persisted and what gets
+      // returned are always the same roll. Rolling outside the loop would be no more fair and
+      // would pin the player to a roll made against a stale save.
+      const { result: opened, save: persisted } = await mutateSave(store, user, (save) => {
       let kind: ChestKey;
       if (body.source === 'pending') {
         const i = body.index ?? -1;
@@ -89,10 +93,11 @@ export async function economyRoutes(app: FastifyInstance): Promise<void> {
         );
       }
 
-      const result = grantChest(save, rollChest(serverRng(), kind));
-      const persisted = await persistSave(store, user.id, save);
-      req.log.info({ userId: user.id, source: body.source, kind }, 'chest opened');
-      return { kind, result, save: persisted };
+        const result = grantChest(save, rollChest(serverRng(), kind));
+        return { kind, result };
+      });
+      req.log.info({ userId: user.id, source: body.source, kind: opened.kind }, 'chest opened');
+      return { kind: opened.kind, result: opened.result, save: persisted };
     },
   );
 
@@ -105,27 +110,31 @@ export async function economyRoutes(app: FastifyInstance): Promise<void> {
       const entry = SHOP[index];
       if (!entry) throw badRequest(SERVER_ERRORS.unknownShopItem, 'no such shop entry');
 
-      const { save } = await loadSave(store, user);
-      const balance = entry.cur === 'gold' ? save.gold : save.gem;
-      if (balance < entry.price) throw notEnough(`need ${entry.price} ${entry.cur}`);
+      const { result: bought, save: persisted } = await mutateSave(store, user, (save) => {
+        const balance = entry.cur === 'gold' ? save.gold : save.gem;
+        if (balance < entry.price) throw notEnough(`need ${entry.price} ${entry.cur}`);
 
-      // L2705-2709 verbatim ordering: debit first, then credit. It matters for the gold packs
-      // and for gold-priced chests, whose contents also pay gold.
-      if (entry.cur === 'gold') save.gold -= entry.price;
-      else save.gem -= entry.price;
+        // L2705-2709 verbatim ordering: debit first, then credit. It matters for the gold packs
+        // and for gold-priced chests, whose contents also pay gold.
+        if (entry.cur === 'gold') save.gold -= entry.price;
+        else save.gem -= entry.price;
 
-      if (entry.kind === 'gold') {
-        const gold = entry.gold ?? 0;
-        save.gold += gold;
-        const persisted = await persistSave(store, user.id, save);
-        return { save: persisted, gold };
+        if (entry.kind === 'gold') {
+          const gold = entry.gold ?? 0;
+          save.gold += gold;
+          return { gold, chest: undefined as ShopBuyResponse['chest'] };
+        }
+
+        const kind = entry.kind as ChestKey;
+        return { gold: undefined, chest: { kind, result: grantChest(save, rollChest(serverRng(), kind)) } };
+      });
+      if (bought.chest) {
+        req.log.info(
+          { userId: user.id, kind: bought.chest.kind, price: entry.price, cur: entry.cur },
+          'shop chest purchased',
+        );
       }
-
-      const kind = entry.kind as ChestKey;
-      const result = grantChest(save, rollChest(serverRng(), kind));
-      const persisted = await persistSave(store, user.id, save);
-      req.log.info({ userId: user.id, kind, price: entry.price, cur: entry.cur }, 'shop chest purchased');
-      return { save: persisted, chest: { kind, result } };
+      return { save: persisted, gold: bought.gold, chest: bought.chest };
     },
   );
 
@@ -135,12 +144,11 @@ export async function economyRoutes(app: FastifyInstance): Promise<void> {
     async (req): Promise<QuestClaimResponse> => {
       const { index } = parse(questSchema, req.body);
       const user = await requireUserRow(store, req);
-      const { save } = await loadSave(store, user);
-
-      const reward = claimQuest(save, index);
-      if (!reward) throw nothingToClaim('quest is not complete, already claimed, or does not exist');
-
-      const persisted = await persistSave(store, user.id, save);
+      const { result: reward, save: persisted } = await mutateSave(store, user, (save) => {
+        const r = claimQuest(save, index);
+        if (!r) throw nothingToClaim('quest is not complete, already claimed, or does not exist');
+        return r;
+      });
       return { gold: reward.gold, gem: reward.gem, save: persisted };
     },
   );
@@ -150,20 +158,20 @@ export async function economyRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireUser, config: limit(LIMITS.economy) },
     async (req): Promise<LoginClaimResponse> => {
       const user = await requireUserRow(store, req);
-      const { save } = await loadSave(store, user);
+      const { result: claimed, save: persisted } = await mutateSave(store, user, (save) => {
+        const claim = claimLogin(save);
+        if (!claim) throw nothingToClaim('today’s login reward has already been claimed');
 
-      const claim = claimLogin(save);
-      if (!claim) throw nothingToClaim('today’s login reward has already been claimed');
-
-      // Day 7 pays a Golden Chest *and* 150 gems; `claimLogin` applied the gems, the chest is
-      // rolled and granted here so the client gets contents to animate in the same response.
-      let chest: LoginClaimResponse['chest'];
-      if (claim.chest) {
-        const kind = claim.chest;
-        chest = { kind, result: grantChest(save, rollChest(serverRng(), kind)) };
-      }
-      const persisted = await persistSave(store, user.id, save);
-      return { reward: claim.reward, chest, save: persisted };
+        // Day 7 pays a Golden Chest *and* 150 gems; `claimLogin` applied the gems, the chest is
+        // rolled and granted here so the client gets contents to animate in the same response.
+        let chest: LoginClaimResponse['chest'];
+        if (claim.chest) {
+          const kind = claim.chest;
+          chest = { kind, result: grantChest(save, rollChest(serverRng(), kind)) };
+        }
+        return { reward: claim.reward, chest };
+      });
+      return { reward: claimed.reward, chest: claimed.chest, save: persisted };
     },
   );
 
@@ -173,14 +181,13 @@ export async function economyRoutes(app: FastifyInstance): Promise<void> {
     async (req): Promise<UpgradeCardResponse> => {
       const { cardId } = parse(upgradeSchema, req.body);
       const user = await requireUserRow(store, req);
-      const { save } = await loadSave(store, user);
-
-      const up = upgradeCard(save, cardId);
-      // `upgradeCard` folds "not owned", "max level", "not enough duplicates" and "not enough
-      // gold" into one null. The client already greys the button out in all four cases.
-      if (!up) throw notEnough('cannot upgrade: unowned, maxed, or insufficient cards/gold');
-
-      const persisted = await persistSave(store, user.id, save);
+      const { result: up, save: persisted } = await mutateSave(store, user, (save) => {
+        const r = upgradeCard(save, cardId);
+        // `upgradeCard` folds "not owned", "max level", "not enough duplicates" and "not enough
+        // gold" into one null. The client already greys the button out in all four cases.
+        if (!r) throw notEnough('cannot upgrade: unowned, maxed, or insufficient cards/gold');
+        return r;
+      });
       return { level: up.level, cost: up.cost, save: persisted };
     },
   );

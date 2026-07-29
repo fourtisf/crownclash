@@ -13,7 +13,7 @@ import { Snd } from '../engine';
 import { S, setSave } from '../api/store';
 import { api } from '../api/client';
 import { toastTop } from '../ui/toast';
-import { markDots } from '../ui/tabs';
+import { currentTab, markDots } from '../ui/tabs';
 import { refreshHeader } from './home';
 import { STR } from './strings';
 import { apiMessage } from './errors';
@@ -57,7 +57,11 @@ export function renderQuests(body: HTMLElement): void {
         setSave(res.save);
         Snd.coin();
         toastTop(STR.quests.reward(res.gold, res.gem));
-        renderQuests(body);
+        // `body` is the shared `#homeBody`. The prototype re-rendered synchronously so it was
+        // always still the quest list; here the claim is a round-trip and the player can tap
+        // another tab meanwhile. Repainting unconditionally would stamp the quest list into a
+        // container the navbar says is showing Shop.
+        if (currentTab() === 'quest') renderQuests(body);
         refreshHeader();
         markDots();
       } catch (err) {

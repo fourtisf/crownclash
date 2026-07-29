@@ -234,10 +234,26 @@ export const STR = {
 
   /* ------------------------------------------------------------ shared/error */
   err: {
-    /** NEW — everything below is server-era. */
+    /**
+     * NEW — everything below is server-era.
+     *
+     * One line per `API_ERRORS` code the meta screens can actually provoke. They exist
+     * because `ApiError.message` is documented in `apps/server/src/lib/errors.ts` as being
+     * "for humans reading logs and dev consoles — never for the client to parse": it is
+     * English-only developer register ("no session cookie", "cannot upgrade: unowned, maxed,
+     * or insufficient cards/gold") and sometimes a zod issue list. Showing it in a toast
+     * leaks internals and reads nothing like the rest of the game's copy.
+     */
     offline: 'You are offline — try again in a moment.',
     tooFast: 'Slow down a moment and try again.',
     generic: 'Something went wrong. Try again.',
+    /** 401 — the only failure the player cannot retry their way out of. Say what fixes it. */
+    sessionExpired: 'Your session expired. Reload the page to continue.',
+    serverDown: 'The server is not responding. Try again in a moment.',
+    notEnough: "You don't have enough for that.",
+    nothingToClaim: 'Nothing to claim there right now.',
+    walletTaken: 'That wallet is already linked to another account.',
+    badSignature: 'That signature could not be verified.',
   },
 } as const;
 

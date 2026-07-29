@@ -11,7 +11,7 @@ import { Snd } from '../engine';
 import { S, setSave } from '../api/store';
 import { api } from '../api/client';
 import { toastTop } from '../ui/toast';
-import { markDots } from '../ui/tabs';
+import { currentTab, markDots } from '../ui/tabs';
 import { refreshHeader } from './home';
 import { openChestFlow } from './chest';
 import { openWallet } from './wallet';
@@ -69,7 +69,9 @@ async function claimLogin(body: HTMLElement, btn: HTMLButtonElement): Promise<vo
       openChestFlow({ kind: res.chest.kind, result: Promise.resolve(res.chest.result) });
     } else {
       toastTop(STR.login.claimedToast(res.reward.n));
-      renderLogin(body);
+      // Same guard as the quest claim: `body` is the shared `#homeBody`, and the player can
+      // change tabs during the round-trip the prototype never had.
+      if (currentTab() === 'login') renderLogin(body);
     }
   } catch (err) {
     btn.disabled = false;

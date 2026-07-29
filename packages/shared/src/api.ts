@@ -74,6 +74,8 @@ export interface ProfileUpdateRequest {
   avatar?: string;
   sfx?: boolean;
   deck?: string[];
+  /** First-run explainer dismissed. The prototype persisted this on `S` (L2995). */
+  seen?: boolean;
 }
 
 /* --------------------------------------------------------------------- match */

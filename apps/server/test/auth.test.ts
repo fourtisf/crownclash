@@ -231,13 +231,10 @@ describe('wallet link — Solana', () => {
     const wallet = new SolanaWallet();
 
     const c1 = await challenge(anon, wallet.address, 'solana');
-    const created = json<WalletLinkResponse>(
-      await anon.post('/api/auth/wallet/link', {
-        address: wallet.address, kind: 'solana', signature: wallet.sign(c1.message), message: c1.message,
-      }),
-    );
+    await anon.post('/api/auth/wallet/link', {
+      address: wallet.address, kind: 'solana', signature: wallet.sign(c1.message), message: c1.message,
+    });
     const userId = json<AuthResponse>(await anon.get('/api/auth/me')).userId;
-    void created;
 
     // Give the account progress, then unlink — `User.wallet` goes null but the synthetic
     // device id stays, so a naive re-link would collide on it.

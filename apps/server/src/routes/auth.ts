@@ -22,22 +22,60 @@
  * The empty guest row left behind is orphaned, not deleted: a signature should never be able
  * to destroy a row, and an unreferenced default save costs a few hundred bytes.
  */
+import { createHmac } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { API_ERRORS, defaultState, type AuthResponse, type WalletLinkResponse, type WalletNonceResponse } from '@crown/shared';
 import { clearSession, issueSession, requireUser } from '../lib/auth.js';
 import { HttpError, badRequest, unauthorized } from '../lib/errors.js';
 import { LIMITS, limit } from '../lib/ratelimit.js';
-import { hasProgress, loadSave, persistSave } from '../lib/saves.js';
+import { hasProgress, loadSave, mutateSave, repairSave } from '../lib/saves.js';
 import { WalletConflictError, type Store, type UserRow } from '../lib/store.js';
 import { buildChallenge, extractNonce, normalizeAddress, verifyWalletSignature, type WalletKind } from '../lib/wallet.js';
+import { env } from '../lib/env.js';
 
 /** +100 gems, once per account, server-side (handoff §3.3). */
 export const WALLET_BONUS_GEMS = 100;
 
+/**
+ * Device ids for wallet-first accounts live in a reserved namespace (see `walletDeviceId`).
+ * `/api/auth/guest` authenticates on the device id ALONE — presenting one is presenting a
+ * credential — so the namespace has to be unreachable from this endpoint. Without this guard,
+ * anyone who could guess a wallet account's device id would be handed that account's session.
+ *
+ * Real client ids are 32 hex characters (apps/web/src/api/store.ts), so nothing legitimate
+ * contains a colon and this rejects no real device.
+ */
+const RESERVED_DEVICE_PREFIX = 'wallet:';
+
 const guestSchema = z.object({
-  deviceId: z.string().trim().min(8).max(128),
+  deviceId: z
+    .string()
+    .trim()
+    .min(8)
+    .max(128)
+    .refine((v) => !v.toLowerCase().startsWith(RESERVED_DEVICE_PREFIX), {
+      message: 'deviceId uses a reserved namespace',
+    }),
 });
+
+/**
+ * Device id for an account created by a wallet signature on a browser that never had a guest
+ * session.
+ *
+ * The address is HMAC'd rather than embedded. A wallet address is public by construction, so
+ * deriving a login credential from it directly would mean the credential is public too — the
+ * value has to be unguessable without the server secret even though it is deterministic, so
+ * the unlink-then-relink path can still find the row.
+ *
+ * Rotating AUTH_SECRET orphans these synthetic ids. That is tolerable: the primary lookup is
+ * `store.userByWallet`, and this derivation is only the fallback for an account whose
+ * `User.wallet` was cleared by an unlink.
+ */
+function walletDeviceId(kind: WalletKind, wallet: string): string {
+  const mac = createHmac('sha256', env.AUTH_SECRET).update(`${kind}:${wallet}`).digest('hex');
+  return `${RESERVED_DEVICE_PREFIX}${kind}:${mac}`;
+}
 
 const kindSchema = z.enum(['evm', 'solana']);
 
@@ -59,20 +97,13 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   return res.data;
 }
 
-/** Loads the save, writing back only if the load itself repaired or rolled something. */
-async function currentSave(store: Store, user: UserRow) {
-  const { save, dirty } = await loadSave(store, user);
-  if (dirty) await persistSave(store, user.id, save);
-  return save;
-}
-
 async function authBody(store: Store, user: UserRow, created: boolean): Promise<AuthResponse> {
   return {
     userId: user.id,
     wallet: user.wallet,
     walletKind: user.walletKind,
     airdropEligible: user.airdropEligible,
-    save: await currentSave(store, user),
+    save: await repairSave(store, user),
     created,
   };
 }
@@ -210,7 +241,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         // `deviceId`: a wallet-first player who unlinks and later signs in again from a clean
         // browser is no longer findable by wallet, and creating a second row would both
         // collide on the unique index and strand their save.
-        const deviceId = `wallet:${kind}:${wallet}`;
+        const deviceId = walletDeviceId(kind, wallet);
         user = (await store.userByDeviceId(deviceId)) ?? (await store.createUser({ deviceId, save: defaultState() }));
       }
 
@@ -227,17 +258,25 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
       await issueSession(reply, user.id);
 
-      const { save } = await loadSave(store, user);
-      let bonusGranted = false;
-      // Guarded on the save, not on the user row: unlink → relink must not pay twice.
-      if (!save.walletBonus) {
-        save.gem += WALLET_BONUS_GEMS;
-        save.walletBonus = true;
-        bonusGranted = true;
-      }
-      save.wallet = user.wallet;
-      save.walletKind = user.walletKind;
-      const persisted = await persistSave(store, user.id, save);
+      // Compare-and-set. `walletBonus` is the *only* thing standing between this endpoint and
+      // paying 100 gems twice, and it lives inside the save document — so an unguarded
+      // read-modify-write here could have the flag reset by any other write that was read
+      // before the link and landed after it, at which point an unlink/relink pays again.
+      // Re-running the closure on a retry re-reads the flag, which is exactly the check we want.
+      const linked = await mutateSave(store, user, (save) => {
+        let granted = false;
+        // Guarded on the save, not on the user row: unlink → relink must not pay twice.
+        if (!save.walletBonus) {
+          save.gem += WALLET_BONUS_GEMS;
+          save.walletBonus = true;
+          granted = true;
+        }
+        save.wallet = user.wallet;
+        save.walletKind = user.walletKind;
+        return granted;
+      });
+      const bonusGranted = linked.result;
+      const persisted = linked.save;
 
       return {
         wallet: user.wallet!,
@@ -258,8 +297,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       // Airdrop eligibility goes with the wallet — there is no address left to pay. The
       // `walletBonus` flag on the save deliberately does NOT reset, so relinking pays nothing.
       const updated = await store.setWallet(user.id, { wallet: null, walletKind: null, airdropEligible: false });
-      const { save } = await loadSave(store, updated);
-      const persisted = await persistSave(store, updated.id, save);
+      // The wallet has already been cleared on the `User` row, which is the fact; this write
+      // only re-stamps the save's display copy, so `repairSave` is enough.
+      const persisted = await repairSave(store, updated);
       return { wallet: null, walletKind: null, airdropEligible: false, save: persisted };
     },
   );

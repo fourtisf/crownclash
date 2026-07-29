@@ -13,6 +13,7 @@
  * Saves are deep-cloned on the way in and out. Without that a route could mutate the "stored"
  * save by accident and the test suite would agree with a bug the real store would have caught.
  */
+import { SaveConflictError } from './store.js';
 import type { SaveState } from '@crown/shared';
 import type {
   LeaderboardRow, MatchCompleteInput, MatchCreateInput, MatchRow, NonceRow, SavePutMeta, SaveRow,
@@ -71,6 +72,7 @@ export class MemoryStore implements Store {
       migrated: false,
       sanitizeFlags: [],
       updatedAt: new Date(),
+      version: 0,
     });
     return { ...user };
   }
@@ -105,6 +107,12 @@ export class MemoryStore implements Store {
 
   async putSave(userId: string, save: SaveState, meta: SavePutMeta = {}): Promise<SaveRow> {
     const prev = this.saves.get(userId);
+    // Compare-and-set. The Map write below is synchronous, so the check and the swap cannot be
+    // interleaved here — but the *caller* awaited between its read and this call, which is
+    // exactly where the lost update happened.
+    if (meta.expectedVersion !== undefined && (prev?.version ?? 0) !== meta.expectedVersion) {
+      throw new SaveConflictError();
+    }
     const row: SaveRow = {
       userId,
       json: clone(save),
@@ -113,6 +121,7 @@ export class MemoryStore implements Store {
       migrated: meta.migrated ?? prev?.migrated ?? false,
       sanitizeFlags: meta.sanitizeFlags ?? prev?.sanitizeFlags ?? [],
       updatedAt: new Date(),
+      version: (prev?.version ?? 0) + 1,
     };
     this.saves.set(userId, row);
     return { ...row, json: clone(row.json) };

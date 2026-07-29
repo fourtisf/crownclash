@@ -35,6 +35,14 @@ export interface UserRow {
   createdAt: Date;
 }
 
+/** Thrown by `putSave` when `expectedVersion` no longer matches the stored row. */
+export class SaveConflictError extends Error {
+  constructor() {
+    super('save was modified concurrently');
+    this.name = 'SaveConflictError';
+  }
+}
+
 export interface SaveRow {
   userId: string;
   json: SaveState;
@@ -43,6 +51,17 @@ export interface SaveRow {
   migrated: boolean;
   sanitizeFlags: string[];
   updatedAt: Date;
+  /**
+   * Optimistic-concurrency counter, incremented on every write.
+   *
+   * A save is read, mutated in JS and written back, so two overlapping requests — claiming a
+   * quest while an upgrade is in flight — would each write a full document computed from the
+   * same starting point and the loser's changes would vanish. Passing the version we read as
+   * `expectedVersion` turns the write into a compare-and-set; `mutateSave` retries the whole
+   * read-modify-write on conflict. PM2 runs the api in cluster mode, so an in-process lock
+   * would not have been enough.
+   */
+  version: number;
 }
 
 export interface MatchOpponent {
@@ -102,6 +121,12 @@ export interface LeaderboardRow {
 export interface SavePutMeta {
   migrated?: boolean;
   sanitizeFlags?: string[];
+  /**
+   * Compare-and-set guard. When set, the write only lands if the stored version still matches;
+   * otherwise the store throws `SaveConflictError`. Omit it for writes that are legitimately
+   * last-write-wins (migration, first-time creation).
+   */
+  expectedVersion?: number;
 }
 
 export interface Store {

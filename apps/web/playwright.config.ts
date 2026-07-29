@@ -6,10 +6,11 @@ import { defineConfig, devices } from '@playwright/test';
  * Boots the real server and the real client and drives the full first-session journey in a
  * mobile viewport, because mobile is the primary target (§6: 480px frame, test at 380×740).
  *
- * The server runs with `PERSISTENCE=memory`, which swaps Postgres and Redis for in-process
- * fakes. That is deliberate: this suite exists to prove the *game* works end to end, and
- * making it depend on a provisioned database would mean it never runs in CI and therefore
- * never catches anything. Database-backed behaviour is covered by apps/server/test.
+ * The server is booted by `test/e2e/server.mjs`, which builds the real Fastify app with the
+ * in-memory store adapter instead of Postgres. Every route, validator and the whole
+ * re-simulation path are production code — only persistence differs. That is deliberate:
+ * making this suite depend on a provisioned database would mean it never runs in CI and
+ * therefore never catches anything. Database-backed behaviour is covered by apps/server/test.
  */
 export default defineConfig({
   testDir: './test/e2e',
@@ -25,21 +26,32 @@ export default defineConfig({
     viewport: { width: 380, height: 740 },
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
+    launchOptions: {
+      // Some sandboxes ship a Chromium that does not match the revision this @playwright/test
+      // pins. PLAYWRIGHT_CHROMIUM_EXECUTABLE lets those environments point at the one they
+      // have instead of downloading a second copy; unset, Playwright resolves as normal.
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+    },
   },
   webServer: [
     {
-      command: 'pnpm --filter @crown/server dev',
+      command: 'node --import tsx test/e2e/server.ts',
       port: 8080,
-      cwd: '../..',
       reuseExistingServer: !process.env.CI,
       timeout: 90_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
       env: {
-        PERSISTENCE: 'memory',
         NODE_ENV: 'test',
         PORT: '8080',
-        JWT_SECRET: 'e2e-test-secret-not-used-in-production-0123456789',
-        COOKIE_SECRET: 'e2e-cookie-secret-not-used-in-production-0123',
-        WEB_ORIGIN: 'http://127.0.0.1:5173',
+        // Dev-only secrets. Real ones come from the environment on the VPS (see docs/DEPLOY.md).
+        AUTH_SECRET: 'e2e-auth-secret-not-used-in-production-0123456789',
+        COOKIE_SECRET: 'e2e-cookie-secret-not-used-in-production-0123456',
+        CORS_ORIGIN: 'http://127.0.0.1:5173',
+        // Off in E2E: the suite deliberately fires bursts (chest taps, tab switches) that a
+        // human never would, and 429s would make it flaky without testing anything real.
+        RATE_LIMIT_ENABLED: 'false',
+        LOG_LEVEL: 'warn',
       },
     },
     {

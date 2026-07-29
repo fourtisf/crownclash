@@ -78,6 +78,28 @@ export function openChestFlow(flow: ChestFlow): void {
   }
   draw();
 
+  let revealed = false;
+
+  /** Terminal state, reached exactly once: either the cards pop or the failure line shows. */
+  function reveal(s: Settled): void {
+    if (revealed) return;
+    revealed = true;
+    done = true;
+    const tapMe = $('#tapMe');
+    if (tapMe) tapMe.style.display = 'none';
+    if (s.ok) showRewards(s.res);
+    else showFailure(s.msg);
+  }
+
+  // A failed roll reveals immediately instead of waiting for taps that can no longer matter.
+  // The modal is locked and has no ✕ (L2754 — `ovl.dataset.lock='1'`), so until the reveal
+  // paints NICE! there is *no* way out of it: an offline player who taps OPEN would sit in
+  // front of a wobbling chest with nothing to press. Nothing was granted, so short-circuiting
+  // the animation costs the success path nothing.
+  void settled.then((s) => {
+    if (!s.ok) reveal(s);
+  });
+
   cv.onclick = () => {
     if (done) return;
     taps++;
@@ -99,10 +121,7 @@ export function openChestFlow(flow: ChestFlow): void {
     // The prototype revealed on a flat 480 ms timer; now the reveal is gated on *both* the
     // timer and the server's answer, so a slow network delays the pop rather than showing
     // an empty grid.
-    void Promise.all([settled, delay(480)]).then(([s]) => {
-      if (s.ok) showRewards(s.res);
-      else showFailure(s.msg);
-    });
+    void Promise.all([settled, delay(480)]).then(([s]) => reveal(s));
   };
 
   must<HTMLButtonElement>('#gDone').onclick = () => {
@@ -123,7 +142,15 @@ export function openChestFlow(flow: ChestFlow): void {
       (res.gem > 0 ? '<span>' + STR.chest.gem(res.gem) + '</span>' : '') +
       '</div><div class="rewardgrid" id="rwGrid"></div>';
     const g = must('#rwGrid');
+    // NICE! is revealed before the cards, not after. This modal is locked and has no ✕, so
+    // the button is the only exit; if anything below threw — a card id this client build does
+    // not know, e.g. mid-deploy version skew — a reveal-last order would strand the player in
+    // an undismissable modal until they reloaded the page.
+    must('#gFoot').style.display = 'block';
     res.cards.forEach((cd, i) => {
+      // Unknown id: the gold and gems still landed and the save is already authoritative, so
+      // skip the tile rather than take the whole reveal down with it.
+      if (!CARD[cd.id]) return;
       const el = document.createElement('div');
       el.className = 'rw' + (cd.rar === 'legendary' ? ' legend' : cd.rar === 'epic' ? ' epic' : '');
       el.style.animationDelay = i * 0.12 + 's';
@@ -141,7 +168,6 @@ export function openChestFlow(flow: ChestFlow): void {
         Snd.coin();
       }, i * 120);
     });
-    must('#gFoot').style.display = 'block';
   }
 
   function showFailure(msg: string): void {

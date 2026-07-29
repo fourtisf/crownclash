@@ -64,6 +64,7 @@ export interface DbSave {
   migratedAt: Date | null;
   sanitizeFlags: string[];
   updatedAt: Date;
+  version: number;
 }
 
 export interface DbMatch {

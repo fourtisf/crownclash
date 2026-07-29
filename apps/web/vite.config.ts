@@ -42,6 +42,14 @@ export default defineConfig({
     // Fail loudly instead of silently moving to 5174: the server's CORS_ORIGIN and SIWE_DOMAIN
     // defaults both name port 5173, so a shifted port breaks auth in a confusing way.
     strictPort: true,
+    watch: {
+      // Playwright writes traces, videos and its HTML report into these directories *while a
+      // test is running*. Vite watches its whole root, so without this it sees those writes,
+      // fires a full page reload, and the match under test restarts from the landing page —
+      // which is precisely how the E2E journey failed before this was added. The failure looks
+      // like "the result screen never appeared", so it is worth naming here.
+      ignored: ['**/test-results/**', '**/playwright-report/**', '**/blob-report/**'],
+    },
     proxy: {
       // Same-origin API in dev, exactly as in production, so cookies, CORS and the SIWE domain
       // binding all behave the same in both. `changeOrigin` stays false on purpose: the

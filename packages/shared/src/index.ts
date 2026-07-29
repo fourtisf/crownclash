@@ -14,3 +14,4 @@ export * from './sim.js';
 export * from './ai.js';
 export * from './economy.js';
 export * from './validate.js';
+export * from './api.js';

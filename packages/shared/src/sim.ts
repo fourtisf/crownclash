@@ -140,6 +140,19 @@ export class Sim {
     this.events.push(ev);
   }
 
+  /**
+   * Take everything emitted since the last drain.
+   *
+   * `playHand` runs *between* ticks, so its deploy ring and sound land in the buffer before
+   * the next `tick()`. Clearing on drain rather than at the start of `tick()` is what stops
+   * those from being silently discarded — the player taps a card and hears nothing.
+   */
+  drainEvents(): SimEvent[] {
+    const out = this.events;
+    this.events = [];
+    return out;
+  }
+
   /* ------------------------------------------------------------------ helpers */
 
   /** L1665 */
@@ -204,17 +217,22 @@ export class Sim {
     }
     const n = card.cnt || 1;
     if (n === 1) {
-      this.spawnTroop(cid, team, x, y, lvl);
-      this.emit({ k: 'deploy', cid, team, x, y, count: 1, spread: (card.rad || 0.3) });
+      const u = this.spawnTroop(cid, team, x, y, lvl);
+      // L1696 — ring sits on the unit's *clamped* position, not the tap point.
+      if (u) this.emit({ k: 'ring', x: u.x, y: u.y, team, r: u.rad });
     } else {
       const R = n <= 3 ? 0.55 : 0.95;
       for (let i = 0; i < n; i++) {
         const ang = (i / n) * Math.PI * 2 + this.rng.rnd(0, 0.6);
         const rr2 = n <= 3 ? R : R * (i % 2 ? 0.55 : 1);
-        this.spawnTroop(cid, team, x + Math.cos(ang) * rr2, y + Math.sin(ang) * rr2, lvl);
+        const u = this.spawnTroop(cid, team, x + Math.cos(ang) * rr2, y + Math.sin(ang) * rr2, lvl);
+        // Only the first spawn rings individually (`noRing` was `i>0`); the group ring below
+        // covers the rest. Two rings for a multi-unit card is the prototype's look.
+        if (i === 0 && u) this.emit({ k: 'ring', x: u.x, y: u.y, team, r: u.rad });
       }
-      this.emit({ k: 'deploy', cid, team, x, y, count: n, spread: R + 0.3 });
+      this.emit({ k: 'ring', x, y, team, r: R + 0.3 });
     }
+    this.emit({ k: 'deploy', cid, team, x, y, count: n });
   }
 
   /** L1717-1721 — jolt lands almost instantly; everything else telegraphs for 0.62 s. */
@@ -676,9 +694,8 @@ export class Sim {
    * without a circular import; pass `null` for a sim with no AI opponent (Phase 2 PvP).
    */
   tick(aiStep: ((sim: Sim, dt: number) => void) | null): SimEvent[] {
-    this.events = [];
     const B = this.state;
-    if (B.over) return this.events;
+    if (B.over) return this.drainEvents();
 
     const dt = DT;
     B.tick++;
@@ -700,7 +717,7 @@ export class Sim {
     this.updateSpells(dt);
     if (B.t <= 0) this.timeUp();
 
-    return this.events;
+    return this.drainEvents();
   }
 
   /** Stable fingerprint of the finished match — used by the determinism suite and audits. */

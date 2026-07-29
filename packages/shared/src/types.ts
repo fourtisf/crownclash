@@ -238,7 +238,9 @@ export interface DeployLogEntry {
  * path serve both.
  */
 export type SimEvent =
-  | { k: 'deploy'; cid: string; team: 0 | 1; x: number; y: number; count: number; spread: number }
+  | { k: 'deploy'; cid: string; team: 0 | 1; x: number; y: number; count: number }
+  /** Spawn ring. Emitted once per ring the prototype pushed, so the client can map 1:1. */
+  | { k: 'ring'; x: number; y: number; team: 0 | 1; r: number }
   | { k: 'spellCast'; cid: string; team: 0 | 1; x: number; y: number }
   | { k: 'spellImpact'; cid: string; team: 0 | 1; x: number; y: number; radius: number }
   | { k: 'hit'; x: number; y: number; amount: number; byTeam: 0 | 1; rad: number }

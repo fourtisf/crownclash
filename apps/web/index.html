@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>CROWN CLASH — Arena Royale</title>
+<meta name="description" content="Crown Clash — real-time arena battles. 21 cards, 7 arenas, 3-minute matches. Free to play in your browser.">
+<meta name="theme-color" content="#070c22">
+<meta property="og:title" content="CROWN CLASH — Arena Royale">
+<meta property="og:description" content="Real-time arena battles. Three crowns. Three minutes.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Baloo+2:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ================= LANDING ================= -->
+  <div id="landing">
+   <div class="lp">
+    <section class="lp-hero">
+      <div class="lp-rays"></div><div class="lp-orb"></div>
+      <i class="spk"></i><i class="spk"></i><i class="spk"></i><i class="spk"></i><i class="spk"></i><i class="spk"></i>
+      <canvas id="lpBg"></canvas>
+      <div class="rise" style="--d:0ms"><canvas id="lpLogo"></canvas></div>
+      <div class="rise" style="--d:70ms"><h1 class="lp-word goldtext">CROWN<b>CLASH</b></h1></div>
+      <p class="lp-tag rise" style="--d:140ms">REAL-TIME ARENA BATTLES</p>
+      <div class="lp-div rise" style="--d:175ms"><s></s><b></b><s></s></div>
+      <button class="btn gold big rise" id="lpPlay" style="--d:210ms">⚔️ PLAY NOW</button>
+      <p class="lp-note rise" style="--d:280ms">Free to play &middot; no download &middot; runs in your browser</p>
+      <div class="lp-scroll rise" style="--d:420ms">&#9662;</div>
+    </section>
+
+    <div class="lp-stats">
+      <div><span class="sic">🃏</span><b>21</b><i>CARDS</i></div>
+      <div><span class="sic">🏟️</span><b>7</b><i>ARENAS</i></div>
+      <div><span class="sic">⏱️</span><b>3:00</b><i>PER MATCH</i></div>
+    </div>
+
+    <section class="lp-sec">
+      <div class="eyebrow">STRAIGHT INTO BATTLE</div>
+      <h2 class="lp-h2">Real-time combat,<br>rendered live</h2>
+      <p class="lp-p">This isn't concept art &mdash; it's the actual engine drawing the arena, towers and troops you'll command. No sprite sheets, no downloads.</p>
+      <div class="lp-scenewrap rise" style="--d:60ms"><span class="lp-live">LIVE ENGINE RENDER</span><canvas id="lpScene"></canvas></div>
+    </section>
+
+    <section class="lp-sec">
+      <div class="eyebrow">BUILD YOUR DECK</div>
+      <h2 class="lp-h2">21 cards,<br>four rarities</h2>
+      <p class="lp-p">Commons to Legendaries &mdash; pull copies from chests and push every card to level 13.</p>
+      <div class="lp-fan" id="lpCards"></div>
+    </section>
+
+    <section class="lp-sec">
+      <div class="lp-feats">
+        <div class="lp-feat"><canvas data-art="chest"></canvas>
+          <h3>Chests &amp; gacha</h3><p>Five chest tiers with published drop rates and rarity guarantees.</p></div>
+        <div class="lp-feat"><canvas data-art="tower"></canvas>
+          <h3>Push the arena</h3><p>Climb seven arenas. Trophies decide who you face next.</p></div>
+      </div>
+    </section>
+
+    <section class="lp-sec">
+      <div class="eyebrow">HOW A MATCH WORKS</div>
+      <ol class="lp-steps">
+        <li><b>01</b><div><h4>Spend elixir</h4><p>It refills on a timer. Double speed in the last minute, triple in overtime.</p></div></li>
+        <li><b>02</b><div><h4>Drop your troops</h4><p>Tap a card, tap your half of the arena. They walk, target and fight on their own.</p></div></li>
+        <li><b>03</b><div><h4>Take the crowns</h4><p>Break a tower for a crown. Break the King Tower and the match ends instantly.</p></div></li>
+      </ol>
+    </section>
+
+    <section class="lp-final">
+      <canvas id="lpLogo2"></canvas>
+      <h2 class="goldtext">Three crowns.<br>Three minutes.</h2>
+      <button class="btn gold big" id="lpPlay2">ENTER THE ARENA</button>
+      <p class="lp-note">Progress saves automatically. Connect a wallet later for the $CROWN airdrop.</p>
+    </section>
+    <footer class="lp-foot">CROWN CLASH &middot; built for the arena</footer>
+   </div>
+  </div>
+
+  <!-- ================= HOME ================= -->
+  <div class="screen on" id="home">
+    <div class="topbar">
+      <div class="avatar" id="avatarBox">👑<div class="lvlbadge" id="hLvl">1</div></div>
+      <div>
+        <div class="pname" id="hName">Player</div>
+        <div class="ptro">🏆 <span id="hTro">0</span></div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:5px;align-items:center">
+        <div class="cur"><span class="ic">🪙</span><span id="hGold">0</span></div>
+        <div class="cur"><span class="ic">💎</span><span id="hGem">0</span></div>
+        <button class="wbtn" id="walletBtn" title="Connect wallet">🔗</button>
+      </div>
+    </div>
+
+    <div class="homebody" id="homeBody">
+      <div class="arenacard">
+        <canvas id="arenaMini"></canvas>
+        <div class="inner">
+          <div class="eyebrow">ARENA <span id="hArenaN">1</span></div>
+          <div class="arenaName goldtext" id="hArenaName">Training Camp</div>
+          <div class="trobar"><i id="hTroBar" style="width:0%"></i></div>
+          <div class="trometa"><span id="hTroNow">0 🏆</span><span id="hTroNext">Next arena: 300</span></div>
+          <button class="btn gold big" id="btnBattle" style="width:100%;margin-top:12px">⚔️ BATTLE</button>
+        </div>
+      </div>
+
+      <div class="sect">
+        <div class="secthead"><h3>CHESTS</h3><span class="pill" id="chestHint">Win battles to earn chests</span></div>
+        <div class="chestrow" id="chestRow"></div>
+      </div>
+
+      <div class="sect">
+        <div class="secthead"><h3>BATTLE DECK</h3><span class="pill" id="deckAvg">Avg 0 ⚡</span></div>
+        <div class="deckrow" id="homeDeck"></div>
+      </div>
+
+      <div class="sect" style="padding-bottom:6px">
+        <div class="secthead"><h3>STATS</h3></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+          <div class="chestslot" style="padding:10px 6px"><div class="cn" id="stWin">0</div><div class="cs">WINS</div></div>
+          <div class="chestslot" style="padding:10px 6px"><div class="cn" id="stLose">0</div><div class="cs">LOSSES</div></div>
+          <div class="chestslot" style="padding:10px 6px"><div class="cn" id="stBest">0</div><div class="cs">BEST 🏆</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="navbar" id="navbar">
+      <button class="navbtn on" data-tab="home"><span class="ni">🏰</span>HOME</button>
+      <button class="navbtn" data-tab="cards"><span class="ni">🃏</span>CARDS</button>
+      <button class="navbtn" data-tab="shop"><span class="ni">🛒</span>SHOP</button>
+      <button class="navbtn" data-tab="quest"><span class="ni">📜</span>QUESTS</button>
+      <button class="navbtn" data-tab="login"><span class="ni">🎁</span>DAILY</button>
+    </div>
+  </div>
+
+  <!-- ================= BATTLE ================= -->
+  <div class="screen" id="battle">
+    <div class="bhud">
+      <div class="bside">
+        <span style="font-size:16px">👑</span>
+        <div><div class="nm" id="bEnemyName">Rival</div><div class="crowns" id="bEnemyCrowns"><span>👑</span><span>👑</span><span>👑</span></div></div>
+      </div>
+      <div class="timer" id="bTimer"><div class="t">3:00</div><div class="lb">TIME</div></div>
+      <div class="bside" style="flex-direction:row-reverse">
+        <span style="font-size:16px">🛡️</span>
+        <div style="text-align:right"><div class="nm" id="bMyName">You</div><div class="crowns" id="bMyCrowns" style="justify-content:flex-end"><span>👑</span><span>👑</span><span>👑</span></div></div>
+      </div>
+    </div>
+    <div id="arenaWrap">
+      <canvas id="arena"></canvas>
+      <div class="toast goldtext" id="bToast"></div>
+      <div class="fx-flash" id="bFlash"></div>
+    </div>
+    <div class="handbar">
+      <div class="elixbar" id="elixBar"><span class="x2" id="elixX2"></span><span class="elixnum" id="elixNum">5</span></div>
+      <div class="hand" id="handRow">
+        <div class="nextslot"><div class="nl">NEXT</div><div class="hcard" id="nextCard" style="pointer-events:none"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODALS ================= -->
+  <div class="ovl" id="ovl"><div class="modal" id="modal"></div></div>
+  <div class="ovl" id="ovl2"><div class="modal" id="modal2"></div></div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

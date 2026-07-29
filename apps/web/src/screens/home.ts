@@ -133,7 +133,14 @@ export function drawMiniArena(cv: HTMLCanvasElement | null): void {
 
 let homeBound = false;
 
-/** B1 — bound once for the lifetime of the page, not once per Home render. */
+/**
+ * B1 — bound once for the lifetime of the page, not once per Home render.
+ *
+ * `main.ts` also binds a `#btnBattle` delegate. Both fire on one tap, but `findMatch()`
+ * flips its `searching` guard synchronously before it touches audio or the modal, so the
+ * second call returns immediately and nothing is duplicated. Keeping this one means the Home
+ * screen still works if it is ever mounted without `main.ts`'s wiring.
+ */
 function bindHomeOnce(): void {
   if (homeBound) return;
   homeBound = true;

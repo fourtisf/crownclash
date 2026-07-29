@@ -170,6 +170,14 @@ export const STR = {
       'All progress is saved locally. Your wallet is only used for identity and future $CROWN airdrop claims.',
     disconnect: 'DISCONNECT',
     connected: 'Wallet connected! +100 💎',
+    /**
+     * The prototype stored the *brand* the player tapped ('MetaMask', 'Phantom',
+     * 'WalletConnect') and printed it. The server stores the chain instead
+     * (`walletKind: 'evm' | 'solana'`), because that is what it verified — it cannot know
+     * which app produced the signature. So "Wallet MetaMask tersambung." became
+     * "Wallet EVM tersambung.": same sentence, honest noun.
+     */
+    kindLabel: (kind: string): string => (kind === 'evm' ? 'EVM' : kind === 'solana' ? 'Solana' : kind),
     /* NEW — failure copy for the real flow. */
     noMetaMask: 'MetaMask not detected — install the extension and reload.',
     noPhantom: 'Phantom not detected — install the extension and reload.',
@@ -230,7 +238,6 @@ export const STR = {
     offline: 'You are offline — try again in a moment.',
     tooFast: 'Slow down a moment and try again.',
     generic: 'Something went wrong. Try again.',
-    noBattleEngine: 'Battle engine not ready — reload the page.',
   },
 } as const;
 

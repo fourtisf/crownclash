@@ -167,8 +167,9 @@ export class MemoryRedis implements RedisLike {
   async del(...keys: string[]): Promise<number> {
     let n = 0;
     for (const k of keys) {
-      if (this.kv.delete(k)) n++;
-      if (this.zsets.delete(k)) n++;
+      // Redis DEL is type-agnostic, so the fallback has to sweep all three namespaces or a
+      // test that clears a stream would silently leave it populated.
+      if (this.kv.delete(k) || this.zsets.delete(k) || this.streams.delete(k)) n++;
     }
     return n;
   }
@@ -229,7 +230,13 @@ export class MemoryRedis implements RedisLike {
    * `blockMs` is ignored: the fallback has no other process to wait on, and the worker
    * already paces itself between ticks. Returning immediately keeps the dev loop responsive.
    */
-  async xreadgroup(stream: string, group: string, _consumer: string, count: number): Promise<StreamEntry[]> {
+  async xreadgroup(
+    stream: string,
+    group: string,
+    _consumer: string,
+    count: number,
+    _blockMs = 0,
+  ): Promise<StreamEntry[]> {
     const s = this.stream(stream);
     let g = s.groups.get(group);
     if (!g) s.groups.set(group, (g = { cursor: 0, pending: new Set() }));

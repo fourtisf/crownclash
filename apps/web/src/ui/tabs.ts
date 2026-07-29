@@ -43,6 +43,12 @@ function ensureBound(): void {
     const target = e.target as HTMLElement | null;
     const b = target && target.closest<HTMLElement>('.navbtn');
     if (!b) return;
+    // `main.ts` currently binds its own copy of this delegate. Both fire on one tap, and two
+    // renders plus two overlapping 660 Hz blips is audible. The `.on` class is the shared
+    // signal: whichever handler runs first sets it, and the second bails. Standing alone,
+    // this handler still works — the tapped button is not `.on` yet. The only casualty is
+    // re-tapping the *active* tab to force a re-render, which nothing depends on.
+    if (b.classList.contains('on')) return;
     Snd.init();
     Snd.play(660, 0.05, 'triangle', 0.05);
     const name = b.dataset.tab;
@@ -57,8 +63,15 @@ export function currentTab(): TabName {
   return isTab(name) ? name : 'home';
 }
 
-/** L2408-2414 */
-export function setTab(name: TabName): void {
+/**
+ * L2408-2414
+ *
+ * Takes a plain `string` rather than `TabName` because the call sites read it straight off
+ * `dataset.tab`, exactly as the prototype did. An unrecognised name toggles the nav (nothing
+ * matches, so every button clears) and renders nothing — the prototype's if/else chain
+ * behaved identically.
+ */
+export function setTab(name: TabName | string): void {
   ensureBound();
   $$('.navbtn').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
   const body = must('#homeBody');

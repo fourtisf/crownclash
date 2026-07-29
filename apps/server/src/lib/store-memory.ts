@@ -18,8 +18,12 @@ import type {
   LeaderboardRow, MatchCompleteInput, MatchCreateInput, MatchRow, NonceRow, SavePutMeta, SaveRow,
   Store, UserRow,
 } from './store.js';
+import { WalletConflictError } from './store.js';
 
-const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+// `structuredClone`, not a JSON round-trip: the `Store` interface returns real `Date`s and a
+// JSON clone would hand back strings, so the memory store would quietly disagree with Prisma
+// about the type of every timestamp.
+const clone = <T>(v: T): T => structuredClone(v);
 
 let idSeq = 0;
 const nextId = (prefix: string): string => `${prefix}_${(++idSeq).toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -79,7 +83,7 @@ export class MemoryStore implements Store {
     if (!u) throw new Error('user not found');
     if (patch.wallet) {
       for (const other of this.users.values()) {
-        if (other.id !== userId && other.wallet === patch.wallet) throw new Error('unique constraint: wallet');
+        if (other.id !== userId && other.wallet === patch.wallet) throw new WalletConflictError();
       }
     }
     u.wallet = patch.wallet;

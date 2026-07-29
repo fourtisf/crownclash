@@ -13,6 +13,19 @@
  */
 import type { DeployLogEntry, MatchOutcome, SaveState, SimConfig } from '@crown/shared';
 
+/**
+ * Thrown when a wallet is already bound to a different `User`. Both stores raise this same
+ * class so `routes/auth.ts` can map it to `API_ERRORS.walletTaken` without sniffing driver
+ * error codes. It is a race guard, not the primary check — the route reads `userByWallet`
+ * first; this only fires when two links land in the same instant.
+ */
+export class WalletConflictError extends Error {
+  constructor() {
+    super('wallet already linked to another account');
+    this.name = 'WalletConflictError';
+  }
+}
+
 export interface UserRow {
   id: string;
   deviceId: string;

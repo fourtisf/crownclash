@@ -1,0 +1,141 @@
+/**
+ * Persistence boundary.
+ *
+ * Every route talks to this interface and nothing else. Two implementations exist:
+ * `store-prisma.ts` (Postgres, production) and `store-memory.ts` (tests, and `pnpm dev`
+ * before anyone has run a migration).
+ *
+ * The interface is not a generic ORM wrapper — it is exactly the set of operations the game
+ * needs, and several of them are deliberately *conditional writes* rather than read-modify-
+ * write pairs. `claimMatch` and `consumeNonce` in particular have to be atomic or the two
+ * things this server exists to prevent (double payouts, replayed signatures) come straight
+ * back under concurrency.
+ */
+import type { DeployLogEntry, MatchOutcome, SaveState, SimConfig } from '@crown/shared';
+
+export interface UserRow {
+  id: string;
+  deviceId: string;
+  wallet: string | null;
+  walletKind: string | null;
+  airdropEligible: boolean;
+  createdAt: Date;
+}
+
+export interface SaveRow {
+  userId: string;
+  json: SaveState;
+  trophies: number;
+  best: number;
+  migrated: boolean;
+  sanitizeFlags: string[];
+  updatedAt: Date;
+}
+
+export interface MatchOpponent {
+  name: string;
+  avatar: string;
+  trophies: number;
+}
+
+export interface MatchRow {
+  id: string;
+  userId: string;
+  seed: string;
+  mode: string;
+  config: SimConfig;
+  aiDeck: string[] | null;
+  aiLevel: number;
+  arenaIndex: number;
+  opponent: MatchOpponent | null;
+  deployLog: DeployLogEntry[] | null;
+  result: MatchOutcome | null;
+  crowns: [number, number] | null;
+  validated: boolean;
+  voidReason: string | null;
+  resultHash: string | null;
+  rewardSeed: string | null;
+  trophyDelta: number | null;
+  createdAt: Date;
+  finishedAt: Date | null;
+}
+
+export type MatchCreateInput = Pick<
+  MatchRow,
+  'userId' | 'seed' | 'mode' | 'config' | 'aiDeck' | 'aiLevel' | 'arenaIndex' | 'opponent'
+>;
+
+export type MatchCompleteInput = Partial<
+  Pick<MatchRow, 'deployLog' | 'result' | 'crowns' | 'validated' | 'voidReason' | 'resultHash' | 'rewardSeed' | 'trophyDelta'>
+>;
+
+export interface NonceRow {
+  nonce: string;
+  address: string;
+  kind: 'evm' | 'solana';
+  message: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+}
+
+export interface LeaderboardRow {
+  userId: string;
+  name: string;
+  avatar: string;
+  trophies: number;
+  best: number;
+}
+
+export interface SavePutMeta {
+  migrated?: boolean;
+  sanitizeFlags?: string[];
+}
+
+export interface Store {
+  /* -------------------------------------------------------------------- users */
+  userById(id: string): Promise<UserRow | null>;
+  userByDeviceId(deviceId: string): Promise<UserRow | null>;
+  /** `wallet` is already normalised by `wallet.ts` (lower-case for EVM, verbatim base58). */
+  userByWallet(wallet: string): Promise<UserRow | null>;
+  /** Creates the user and its Save row together; the two never exist apart. */
+  createUser(input: { deviceId: string; save: SaveState }): Promise<UserRow>;
+  setWallet(
+    userId: string,
+    patch: { wallet: string | null; walletKind: string | null; airdropEligible: boolean },
+  ): Promise<UserRow>;
+  touchUser(userId: string, at: Date): Promise<void>;
+
+  /* -------------------------------------------------------------------- saves */
+  getSave(userId: string): Promise<SaveRow | null>;
+  putSave(userId: string, save: SaveState, meta?: SavePutMeta): Promise<SaveRow>;
+
+  /* ------------------------------------------------------------------- nonces */
+  createNonce(row: NonceRow): Promise<void>;
+  /**
+   * Single-use consumption. Must be one conditional write — `usedAt IS NULL AND expiresAt >
+   * now` in the WHERE clause — so two simultaneous submissions of the same signature cannot
+   * both succeed. Returns the row only to the caller that won.
+   */
+  consumeNonce(nonce: string, now: Date): Promise<NonceRow | null>;
+  purgeNonces(before: Date): Promise<number>;
+
+  /* ------------------------------------------------------------------ matches */
+  createMatch(input: MatchCreateInput): Promise<MatchRow>;
+  getMatch(id: string): Promise<MatchRow | null>;
+  /**
+   * Atomically transition `finishedAt: null → at`. False means somebody already finished it,
+   * which is how `matchAlreadyFinished` stays correct under a double-submit race. Claiming
+   * *before* the re-sim means the loser of the race never touches the save.
+   */
+  claimMatch(id: string, at: Date): Promise<boolean>;
+  completeMatch(id: string, patch: MatchCompleteInput): Promise<void>;
+  /** Marks matches started before `before` and never finished as voided. Returns the count. */
+  expireMatches(before: Date, at: Date): Promise<number>;
+
+  /* -------------------------------------------------------------- leaderboard */
+  topSaves(limit: number): Promise<LeaderboardRow[]>;
+  /** Number of saves strictly above `trophies` — rank is this + 1. */
+  countAbove(trophies: number): Promise<number>;
+
+  close(): Promise<void>;
+}

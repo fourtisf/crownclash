@@ -40,27 +40,118 @@ function buildArenaBG(){
   const W=AW*s,H=AH*s, ry0=RIV_T*s, rh=(RIV_B-RIV_T)*s;
   const g1=a.g1, g2=a.g2;
 
-  /* ---- rumput: checker 2 tile, kontras rendah ---- */
+  /*
+   * Ground.
+   *
+   * The prototype filled the field with one flat green, a hard 2-tile checkerboard and two
+   * sets of white mowing bands. Flat colour over 70% of the screen is the single biggest
+   * reason the game read as dated — a real field has tonal drift, and eyes read that drift as
+   * "surface" long before they notice any individual blade of grass.
+   *
+   * All the scatter below is derived from a hash of its own coordinates rather than
+   * Math.random(), so the field is stable: the same arena looks the same every match instead
+   * of reshuffling its texture each time you press BATTLE.
+   */
+  const hash2=(x,y)=>{ const n=Math.sin(x*127.1+y*311.7)*43758.5453; return n-Math.floor(n); };
+
   c.fillStyle=g1; c.fillRect(0,0,W,H);
-  c.globalAlpha=.5; c.fillStyle=g2;
+
+  /* Sky light: the far end of the pitch sits deeper in shade than the near end. */
+  const sky=c.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'rgba(255,252,225,.10)');
+  sky.addColorStop(.45,'rgba(255,252,225,.02)');
+  sky.addColorStop(1,'rgba(10,20,45,.13)');
+  c.fillStyle=sky; c.fillRect(0,0,W,H);
+
+  /* Broad tonal patches. Big and soft — this is the layer doing the real work. */
+  for(let i=0;i<26;i++){
+    const hx=hash2(i*3.1,7.7), hy=hash2(i*5.3,2.9), hr=hash2(i*1.7,9.1);
+    const px=hx*W, py=hy*H, pr=(.9+hr*2.6)*s;
+    const g=c.createRadialGradient(px,py,0,px,py,pr);
+    const dark=hash2(i,i)>.5;
+    g.addColorStop(0,dark? 'rgba(28,58,32,.16)':'rgba(190,225,140,.13)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    c.fillStyle=g; c.beginPath(); c.arc(px,py,pr,0,6.2832); c.fill();
+  }
+
+  /* Mow bands, now barely there — direction without stripes. */
+  c.globalAlpha=.030; c.fillStyle='#ffffff';
+  for(let y=0;y<AH;y+=3) c.fillRect(0,y*s,W,s*1.5);
+  c.globalAlpha=1;
+  /* A whisper of the prototype's checker, for continuity rather than pattern. */
+  c.globalAlpha=.10; c.fillStyle=g2;
   for(let y=0;y<AH;y+=2) for(let x=0;x<AW;x+=2) if(((x/2|0)+(y/2|0))%2) c.fillRect(x*s,y*s,s*2,s*2);
   c.globalAlpha=1;
-  /* pita potong rumput halus */
-  c.globalAlpha=.055; c.fillStyle='#ffffff';
-  for(let y=0;y<AH;y+=3) c.fillRect(0,y*s,W,s*1.5);
-  c.globalAlpha=.04;
-  for(let x=0;x<AW;x+=3) c.fillRect(x*s,0,s*1.5,H);
-  c.globalAlpha=1;
 
-  /* ---- lane: pita rumput lebih terang, bukan bata ---- */
+  /* Tufts. Two short strokes each, a lit one over a dark one, so they catch the same key
+     light as everything else instead of reading as speckle. */
+  const tuftDark=shade(g2,-.42), tuftLite=shade(g1,.30);
+  for(let i=0;i<760;i++){
+    const tx=hash2(i*1.3,i*2.7)*W, ty=hash2(i*4.1,i*0.9)*H;
+    const len=(.13+hash2(i,i*3)*.16)*s, lean=(hash2(i*7,i)-.5)*.6;
+    c.strokeStyle=tuftDark; c.lineWidth=Math.max(.8,s*.026); c.lineCap='round';
+    c.beginPath(); c.moveTo(tx,ty); c.lineTo(tx+lean*len,ty-len); c.stroke();
+    c.strokeStyle=tuftLite; c.lineWidth=Math.max(.6,s*.016);
+    c.beginPath(); c.moveTo(tx-len*.22,ty); c.lineTo(tx+lean*len-len*.22,ty-len*.78); c.stroke();
+  }
+
+  /*
+   * Lanes.
+   *
+   * Each arena already declares its own `path` colour — Frozen Peak's pale ice, Ember Forge's
+   * scorched orange — and the prototype never used any of them, hardwiring one tan gradient
+   * instead. That is most of why all seven arenas looked alike. These are worn dirt tracks
+   * with irregular trodden edges and scattered grit, tinted per arena.
+   */
   function lane(x,y0,y1,wid){
-    const gx=c.createLinearGradient((x-wid/2)*s,0,(x+wid/2)*s,0);
-    gx.addColorStop(0,'rgba(255,255,255,0)'); gx.addColorStop(.5,'rgba(255,255,255,.16)'); gx.addColorStop(1,'rgba(255,255,255,0)');
-    c.fillStyle=gx; c.fillRect((x-wid/2)*s,y0*s,wid*s,(y1-y0)*s);
-    const dw=wid*.42;
-    const gd=c.createLinearGradient((x-dw/2)*s,0,(x+dw/2)*s,0);
-    gd.addColorStop(0,'rgba(206,172,116,0)'); gd.addColorStop(.5,'rgba(206,172,116,.55)'); gd.addColorStop(1,'rgba(206,172,116,0)');
-    c.fillStyle=gd; c.fillRect((x-dw/2)*s,y0*s,dw*s,(y1-y0)*s);
+    const path=a.path||'#c9a45f';
+    const cx=x*s, top=y0*s, bot=y1*s, half=wid*.32*s/2;
+    /* Trodden edge: grass thins before the bare earth starts. */
+    const soft=c.createLinearGradient(cx-wid*s/2,0,cx+wid*s/2,0);
+    soft.addColorStop(0,'rgba(255,255,255,0)');
+    soft.addColorStop(.5,'rgba(255,250,225,.10)');
+    soft.addColorStop(1,'rgba(255,255,255,0)');
+    c.fillStyle=soft; c.fillRect(cx-wid*s/2,top,wid*s,bot-top);
+
+    /* Bare earth, with a wandering edge rather than a hard rectangle. */
+    const edge=(yy,side)=> cx+side*(half*(.82+Math.sin(yy*.021+side*1.9)*.13+Math.sin(yy*.006)*.07));
+    c.beginPath();
+    c.moveTo(edge(top,-1),top);
+    for(let yy=top;yy<=bot;yy+=8) c.lineTo(edge(yy,-1),yy);
+    for(let yy=bot;yy>=top;yy-=8) c.lineTo(edge(yy,1),yy);
+    c.closePath();
+    const pg=c.createLinearGradient(cx-half,0,cx+half,0);
+    pg.addColorStop(0,shade(path,-.30));
+    pg.addColorStop(.42,shade(path,.10));
+    pg.addColorStop(1,shade(path,-.22));
+    // Kept well under full opacity: a track is worn grass showing earth through it, not a
+    // painted stripe. At .85 the lanes read as tarmac and dominate the whole field.
+    c.fillStyle=pg; c.globalAlpha=.52; c.fill(); c.globalAlpha=1;
+
+    /* Grass creeping back in over the edges, so the boundary is ragged rather than drawn. */
+    c.save(); c.clip();
+    c.strokeStyle=shade(g1,.06); c.lineCap='round';
+    for(let i=0;i<90;i++){
+      const gy=top+hash2(i*3.7,x*17)*(bot-top);
+      const side=hash2(i*2.1,x*5)>.5? 1:-1;
+      const gx2=edge(gy,side)-side*hash2(i*9,x)*half*.34;
+      const len=(.06+hash2(i*4,x*3)*.09)*s;
+      c.lineWidth=Math.max(.7,s*.020); c.globalAlpha=.5;
+      c.beginPath(); c.moveTo(gx2,gy); c.lineTo(gx2+(hash2(i,x)-.5)*len,gy-len); c.stroke();
+    }
+    c.globalAlpha=1; c.restore();
+
+    /* Grit inside the track. */
+    c.save(); c.clip();
+    for(let i=0;i<150;i++){
+      const gy=top+hash2(i*2.3,x*13)* (bot-top);
+      const gx2=cx+(hash2(i*5.9,x*7)-.5)*half*1.7;
+      c.globalAlpha=.10+hash2(i,x)*.16;
+      c.fillStyle=hash2(i*3,x*2)>.5? shade(path,.34):shade(path,-.46);
+      const r=(.02+hash2(i*11,x)*.035)*s;
+      c.beginPath(); c.arc(gx2,gy,r,0,6.2832); c.fill();
+    }
+    c.globalAlpha=1; c.restore();
   }
   BRIDGE.forEach(bx=>{ lane(bx,1.6,RIV_T-.2,2.4); lane(bx,RIV_B+.2,AH-1.6,2.4); });
   /* platform batu di bawah tiap tower */
@@ -164,17 +255,41 @@ function buildArenaBG(){
   turret(bw*.55,bw*.55); turret(W-bw*.55,bw*.55); turret(bw*.55,H-bw*.55); turret(W-bw*.55,H-bw*.55);
 
   /* ---- dekor: pohon, batu, bunga (posisi fix & simetris) ---- */
+  /*
+   * Tree.
+   *
+   * The prototype tinted the canopy straight from the field colours (`shade(g1,.32)` over
+   * `shade(g2,-.36)`), which made every tree a slightly lighter version of the grass it stood
+   * on — they vanished into the background as grey-green scribbles. These use their own
+   * saturated foliage colour, get a cast shadow that leans with the key light, and are built
+   * from a dark base pass with lit clumps on top so the canopy has volume instead of an
+   * outline.
+   */
   function tree(x,y,sz){
-    c.fillStyle='rgba(0,0,0,.26)'; c.beginPath(); c.ellipse(x,y+sz*.82,sz*1.1,sz*.4,0,0,6.3); c.fill();
-    c.fillStyle='#5a3a1c'; c.fillRect(x-sz*.13,y+sz*.28,sz*.26,sz*.5);
-    c.strokeStyle='#22140b'; c.lineWidth=2.2; c.strokeRect(x-sz*.13,y+sz*.28,sz*.26,sz*.5);
-    const cg=c.createLinearGradient(0,y-sz,0,y+sz*.4);
-    cg.addColorStop(0,shade(g1,.32)); cg.addColorStop(1,shade(g2,-.36));
-    c.fillStyle=cg; c.beginPath();
-    c.arc(x,y-sz*.34,sz*.60,0,6.3); c.arc(x-sz*.5,y+sz*.04,sz*.46,0,6.3);
-    c.arc(x+sz*.5,y+sz*.04,sz*.46,0,6.3); c.arc(x,y+sz*.10,sz*.52,0,6.3); c.fill();
-    c.strokeStyle='#22140b'; c.lineWidth=2.8; c.stroke();
-    c.fillStyle='rgba(255,255,255,.20)'; c.beginPath(); c.arc(x-sz*.20,y-sz*.42,sz*.28,0,6.3); c.fill();
+    const leafDark='#1f5a2b', leafMid='#2f7d3a', leafLite='#63b356';
+    /* Cast shadow, offset down-right away from the upper-left key. */
+    c.fillStyle='rgba(6,14,30,.30)';
+    c.beginPath(); c.ellipse(x+sz*.16,y+sz*.86,sz*1.05,sz*.34,0,0,6.3); c.fill();
+    /* Trunk. */
+    const tg=c.createLinearGradient(x-sz*.15,0,x+sz*.15,0);
+    tg.addColorStop(0,'#7a5024'); tg.addColorStop(.42,'#5a3a1c'); tg.addColorStop(1,'#3b2410');
+    c.fillStyle=tg; c.fillRect(x-sz*.13,y+sz*.24,sz*.26,sz*.56);
+    c.strokeStyle='#22140b'; c.lineWidth=2.2; c.strokeRect(x-sz*.13,y+sz*.24,sz*.26,sz*.56);
+    /* Canopy silhouette first, so the outline wraps the whole mass. */
+    const clumps=[[0,-.34,.62],[-.52,.04,.48],[.52,.04,.48],[0,.12,.54]];
+    c.beginPath();
+    for(const [dx,dy,r] of clumps) c.arc(x+sz*dx,y+sz*dy,sz*r,0,6.3);
+    c.fillStyle=leafDark; c.fill();
+    c.strokeStyle='#16200f'; c.lineWidth=2.8; c.stroke();
+    /* Lit clumps, each pulled up-left toward the key light. */
+    for(const [dx,dy,r] of clumps){
+      const g2c=c.createRadialGradient(x+sz*(dx-.18),y+sz*(dy-.22),sz*.04,x+sz*dx,y+sz*dy,sz*r);
+      g2c.addColorStop(0,leafLite); g2c.addColorStop(.55,leafMid); g2c.addColorStop(1,'rgba(31,90,43,0)');
+      c.fillStyle=g2c; c.beginPath(); c.arc(x+sz*dx,y+sz*dy,sz*r*.96,0,6.3); c.fill();
+    }
+    /* Specular on the topmost clump. */
+    c.fillStyle='rgba(255,252,220,.24)';
+    c.beginPath(); c.ellipse(x-sz*.22,y-sz*.50,sz*.26,sz*.17,-.5,0,6.3); c.fill();
   }
   function rock(x,y,r){
     c.fillStyle='rgba(0,0,0,.22)'; c.beginPath(); c.ellipse(x,y+r*.45,r*1.05,r*.38,0,0,6.3); c.fill();

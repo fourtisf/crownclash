@@ -119,6 +119,24 @@ re-simulated. The port makes the sim a **fixed-step pure function**:
 | **B2** | `B` object literal declares `sc:` twice (L1443 `sc:10`, L1445 `sc:12`) and an unused `uid0:0`. | Single `sc`, set by `sizeArena()` before first render. |
 | **B3** | `render()` L2158 reads `if (dp<=0 && u.hp<u.maxHp || u.kind==='tower')` — precedence makes towers always draw a bar even mid-deploy. | Kept as-is: it is the observed visual and towers never deploy. Documented, not changed. |
 | **B4** | `Store` silently swallows every error and falls back to an in-memory map, so a failed save looks identical to a successful one. | Server save with explicit failure surfacing + IndexedDB offline queue. |
+| **B5** | *New in the port.* §5 voids a match with two deploys inside 300 ms, but nothing stopped the client from recording them — two 2-cost cards at 10 elixir is well inside that window, so an honest fast player would have their match voided. | The client enforces the same floor in `playHand` and refuses the tap (with the prototype's "can't afford" buzz) rather than recording a log the server will reject. |
+
+### Slice-prelude decisions (`tools/extract.mjs`)
+
+The four verbatim slices reference identifiers the prototype had as globals. Rather than edit
+the slices, the generated preludes supply them:
+
+- **`arenaBG`** — exported from `arenaBg.ts` as `export let`. ES module live bindings mean
+  `render.ts` sees each rebuilt backdrop the instant `buildArenaBG()` reassigns it, matching
+  the shared-global behaviour the slice was written against. The slice's `arenaBG = cv;` is
+  untouched.
+- **`rnd`** — defined locally in `render.ts` (screen shake) and `sound.ts` (blip detune).
+  `@crown/shared` deliberately exposes randomness *only* on a seeded `Rng`, so no simulation
+  code can reach an unseeded source; these two are presentation-only and must stay off that
+  stream, or a dropped frame could change a match hash.
+- **`S`** — a one-field mirror (`{trophies}` / `{sfx}`) set by `setArenaTrophies()` /
+  `setSfxEnabled()`, so the slices keep reading `S.x` as they always did.
+- **`B` / `aCtx`** — assigned by `bindRenderer()`; `B` is the facade described in §2.
 
 ### Copy kept verbatim (mixed Indonesian/English)
 

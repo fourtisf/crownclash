@@ -16,7 +16,7 @@
  *    integration looked.
  */
 import {
-  AH, AW, CARD, DT, Sim, aiUpdate, clamp,
+  AH, AW, CARD, DT, MIN_DEPLOY_GAP_TICKS, Sim, aiUpdate, clamp,
 } from '@crown/shared';
 import type { DeployLogEntry, MatchStartResponse, Unit } from '@crown/shared';
 import { $, must } from './dom';
@@ -45,6 +45,8 @@ interface BattleView extends RenderFacade {
   lastM: number;
   dragging: boolean;
   submitted: boolean;
+  /** Tick of the last accepted deploy, for the 300 ms floor. -1 before the first. */
+  lastDeployTick: number;
   /* mirrored each frame from sim.state so the verbatim renderer can read them */
   crowns: [number, number];
   elix: [number, number];
@@ -112,6 +114,7 @@ export function startBattle(start: MatchStartResponse): void {
     lastM: -1,
     dragging: false,
     submitted: false,
+    lastDeployTick: -1,
     sc: 12,
     time: 0,
     over: false,
@@ -240,8 +243,19 @@ function renderHand(): void {
 function playHand(i: number, x: number, y: number): boolean {
   if (!B) return false;
   const tick = B.sim.state.tick;
+
+  // Enforce the server's 300 ms deploy floor here too (§5). Without this the client happily
+  // records two taps 200 ms apart — trivially reachable with 10 elixir and two 2-cost cards —
+  // and the server then voids a match the player won fairly. Refusing the tap costs a tenth
+  // of a second; voiding the match costs the match.
+  if (B.lastDeployTick >= 0 && tick - B.lastDeployTick < MIN_DEPLOY_GAP_TICKS) {
+    Snd.play(180, 0.08, 'square', 0.04);
+    return false;
+  }
+
   const cid = B.sim.state.hand[i];
   if (!B.sim.playHand(i, x, y)) return false;
+  B.lastDeployTick = tick;
   B.deployLog.push({ t: tick, cardId: cid, x, y });
   B.fx.apply(B.sim.drainEvents());
   B.selected = -1;

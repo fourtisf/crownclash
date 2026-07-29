@@ -136,9 +136,14 @@ function render(){
     } else {
       if(u.fly){ ell(c,0,.12*sc,u.rad*.85*sc,u.rad*.32*sc,'rgba(0,0,0,.28)'); }
       else ell(c,0,0,u.rad*sc,u.rad*.42*sc,'rgba(0,0,0,.34)');
-      c.strokeStyle=u.team===0? 'rgba(70,160,255,.75)':'rgba(255,90,90,.75)';
-      c.lineWidth=Math.max(1.5,.045*sc);
-      c.beginPath(); c.ellipse(0,0,u.rad*.95*sc,u.rad*.4*sc,0,0,6.3); c.stroke();
+      /* Ownership ring. Thicker than the prototype's and seated on a dark plate, because at
+         phone size the team colour of a 17px troop was the only thing telling you whose it
+         was, and a thin 75%-alpha stroke lost that fight against bright grass. */
+      c.fillStyle='rgba(10,16,32,.30)';
+      c.beginPath(); c.ellipse(0,0,u.rad*1.05*sc,u.rad*.46*sc,0,0,6.3); c.fill();
+      c.strokeStyle=u.team===0? 'rgba(96,178,255,.95)':'rgba(255,108,108,.95)';
+      c.lineWidth=Math.max(2,.062*sc);
+      c.beginPath(); c.ellipse(0,0,u.rad*.98*sc,u.rad*.42*sc,0,0,6.3); c.stroke();
       c.save(); if(u.face<0) c.scale(-1,1);
       if(u.flash>0){ c.shadowColor='rgba(255,90,90,.95)'; c.shadowBlur=(Art.hq?14*u.flash:0); }
       Art.unit(c,u.card,{s:sc,t:B.time,walk:u.walk,atk:u.atkAnim});

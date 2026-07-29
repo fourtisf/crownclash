@@ -47,7 +47,9 @@ function fitCanvas(cv,w,h){
 }
 
 const Art={hq:true};
-const OL='#2b1a10';
+/* Darker and cooler than the prototype's #2b1a10: the field is brighter and more saturated
+   now, and a warm mid-brown outline no longer separated a unit from the grass behind it. */
+const OL='#1b1108';
 function ols(c,w){ c.strokeStyle=OL; c.lineWidth=w; c.lineJoin='round'; c.lineCap='round'; c.stroke(); }
 function vg(c,y0,y1,a,b){ const g=c.createLinearGradient(0,y0,0,y1); g.addColorStop(0,a); g.addColorStop(1,b); return g; }
 /* Parse '#rgb', '#rrggbb' or 'rgb(r,g,b)' into components. */
@@ -81,7 +83,7 @@ function shp(c,col,lw,top,bot,lift){
   const hi=mixTo(shade(col,lift===undefined?.34:lift),KEY_LIGHT,.17);
   const lo=mixTo(shade(col,-.30),AMBIENT,.22);
   c.fillStyle=vg(c,top,bot,hi,lo);
-  c.fill(); ols(c,Math.max(.85,Math.min(lw,hh*.17)));
+  c.fill(); ols(c,Math.max(1.15,Math.min(lw,hh*.19)));
 }
 function pill(c,x,y,w,h,r,col,lw){ rr(c,x,y,w,h,r); shp(c,col,lw,y,y+h); }
 function disc(c,x,y,r,col,lw){ c.beginPath(); c.arc(x,y,r,0,6.2832); shp(c,col,lw,y-r,y+r); }
@@ -457,7 +459,16 @@ Art.spellIcon=function(c,icon,u,t){
 };
 
 Art.unit=function(c,card,o){
-  const a=card.art||{k:'humanoid'}, u=o.s*(a.sz||1)*1.34;
+  /*
+   * Unit scale.
+   *
+   * Raised from the prototype's 1.34 to 1.56 (+16%). On a 380px phone the arena is 18 tiles
+   * wide, so a tile is ~21px and a 0.3-radius troop was rendering at roughly 17px tall — small
+   * enough that an Ironclad and an Archer were the same beige smudge, which makes the game
+   * hard to read rather than hard to play. Purely a draw scale: `rad`, targeting and collision
+   * all come from the simulation and are untouched.
+   */
+  const a=card.art||{k:'humanoid'}, u=o.s*(a.sz||1)*1.56;
   o.walk=o.walk||0; o.t=o.t||0; o.atk=o.atk||0;
   switch(a.k){
     case 'goblin':   Art.goblin(c,a,o,u); break;

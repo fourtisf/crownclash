@@ -20,8 +20,7 @@ import type { FastifyInstance } from 'fastify';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import type {
-  AuthResponse, MatchFinishResponse, MatchStartResponse, SaveResponse, SaveState, SimConfig, WalletLinkResponse,
-  WalletNonceResponse,
+  AuthResponse, MatchFinishResponse, MatchStartResponse, SaveState, SimConfig, WalletLinkResponse, WalletNonceResponse,
 } from '@crown/shared';
 import { buildApp } from '../src/app.js';
 import { MemoryRedis, type RedisBridge } from '../src/lib/redis.js';
@@ -54,6 +53,28 @@ const WRITE_MS = 25;
 class SlowStore implements Store {
   constructor(readonly inner: MemoryStore) {}
 
+  private stall: { gate: Promise<void>; reached: () => void } | null = null;
+
+  /**
+   * Hold the *next* save write until released.
+   *
+   * This is what makes the dangerous ordering reproducible rather than lucky: a request that
+   * read the save early, then had its write held until after another request had already been
+   * answered. That is the shape of a lost update — the stale document lands last and wins.
+   */
+  armStall(): { reached: Promise<void>; release: () => void } {
+    let release!: () => void;
+    let reached!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const arrived = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    this.stall = { gate, reached };
+    return { reached: arrived, release };
+  }
+
   private gap(ms: number = READ_MS): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -81,16 +102,26 @@ class SlowStore implements Store {
     await this.gap();
     return this.inner.setWallet(userId, patch);
   }
-  async touchUser(userId: string, at: Date): Promise<void> {
+  async touchUser(): Promise<void> {
+    // `MemoryStore` has no reader for `lastSeenAt`, so it takes no arguments and stores nothing.
     await this.gap();
-    return this.inner.touchUser(userId, at);
   }
   async getSave(userId: string): Promise<SaveRow | null> {
     await this.gap();
     return this.inner.getSave(userId);
   }
   async putSave(userId: string, save: SaveState, meta?: SavePutMeta): Promise<SaveRow> {
-    await this.gap();
+    const held = this.stall;
+    if (held) {
+      // One-shot: a retry of this same write must not be held again, or it could never land.
+      this.stall = null;
+      held.reached();
+      await held.gate;
+    }
+    // The delay is *before* the delegate call, so the compare-and-set is evaluated against the
+    // state at write time — same as a database evaluating a WHERE clause when the statement
+    // finally runs, not when the request was issued.
+    await this.gap(WRITE_MS);
     return this.inner.putSave(userId, save, meta);
   }
   async createNonce(row: NonceRow): Promise<void> {
@@ -138,11 +169,12 @@ class SlowStore implements Store {
   }
 }
 
-async function slowApp(): Promise<{ app: FastifyInstance; store: MemoryStore }> {
+async function slowApp(): Promise<{ app: FastifyInstance; store: MemoryStore; slow: SlowStore }> {
   const inner = new MemoryStore();
-  app = await buildApp({ store: new SlowStore(inner), redis: memoryRedis(), rateLimit: false, websocket: false });
+  const slow = new SlowStore(inner);
+  app = await buildApp({ store: slow, redis: memoryRedis(), rateLimit: false, websocket: false });
   await app.ready();
-  return { app, store: inner };
+  return { app, store: inner, slow };
 }
 
 class SolanaWallet {
@@ -206,8 +238,8 @@ describe('POST /api/auth/guest — reserved device namespace', () => {
 /* ---------------------------------------------------------- 2. lost updates */
 
 describe('overlapping save writes', () => {
-  it('does not let a profile write erase a match payout', async () => {
-    const { app: a, store } = await slowApp();
+  it('does not let a stale profile write erase a match payout', async () => {
+    const { app: a, store, slow } = await slowApp();
     const agent = await guest(a, 'device-race-match01');
     const userId = json<AuthResponse>(await agent.get('/api/auth/me')).userId;
 
@@ -220,20 +252,27 @@ describe('overlapping save writes', () => {
 
     const before = (await store.getSave(userId))!.json;
     // A legal deck the player already owns, differing from the current one — exactly what the
-    // deck editor posts, and what a player might tap while the result screen is still settling.
+    // deck editor posts, and what a player might tap while a result screen is still settling.
     const spare = Object.keys(before.cards).find((id) => before.deck.indexOf(id) < 0)!;
     const newDeck = [spare, ...before.deck.slice(1)];
 
-    const [finishRes, profileRes] = await Promise.all([
-      agent.post('/api/match/finish', { matchId: start.matchId, deployLog: log }),
-      agent.post('/api/save/profile', { deck: newDeck }),
-    ]);
+    // The deck edit reads the save now, but its write is held until after the match has been
+    // paid out and answered. Its document therefore knows nothing about the trophies, the gold
+    // or the chest, and landing it verbatim would erase all three.
+    const stall = slow.armStall();
+    const profile = agent.post('/api/save/profile', { deck: newDeck });
+    await stall.reached;
+
+    const finishRes = await agent.post('/api/match/finish', { matchId: start.matchId, deployLog: log });
     expect(finishRes.statusCode).toBe(200);
-    expect(profileRes.statusCode).toBe(200);
     const finish = json<MatchFinishResponse>(finishRes);
     expect(finish.voided).toBeUndefined();
+    expect(finish.rewards.gold).toBeGreaterThan(0);
 
-    // Whichever write landed second, the stored save must carry BOTH effects.
+    stall.release();
+    expect((await profile).statusCode).toBe(200);
+
+    // Both effects must survive: the payout the player was told they had, and the deck they set.
     const after = (await store.getSave(userId))!.json;
     expect(after.deck).toEqual(newDeck);
     expect(after.trophies).toBe(finish.rewards.trophiesAfter);
@@ -241,31 +280,30 @@ describe('overlapping save writes', () => {
     expect(after.wins + after.losses).toBe(1);
   });
 
-  it('pays the wallet bonus once even when a save write is in flight across the link', async () => {
-    const { app: a, store } = await slowApp();
+  it('pays the wallet bonus once even when a stale save write lands after the link', async () => {
+    const { app: a, store, slow } = await slowApp();
     const agent = await guest(a, 'device-race-wallet1');
     const userId = json<AuthResponse>(await agent.get('/api/auth/me')).userId;
     const gemsBefore = (await store.getSave(userId))!.json.gem;
     const wallet = new SolanaWallet();
 
-    const c = json<WalletNonceResponse>(
-      await agent.post('/api/auth/wallet/nonce', { address: wallet.address, kind: 'solana' }),
-    );
-    const [linkRes, profileRes] = await Promise.all([
-      agent.post('/api/auth/wallet/link', {
-        address: wallet.address, kind: 'solana', signature: wallet.sign(c.message), message: c.message,
-      }),
-      agent.post('/api/save/profile', { name: 'Racer' }),
-    ]);
-    expect(linkRes.statusCode).toBe(200);
-    expect(profileRes.statusCode).toBe(200);
-    expect(json<WalletLinkResponse>(linkRes).bonusGranted).toBe(true);
+    // Same shape: a write that read the save before the wallet was linked, landing after.
+    const stall = slow.armStall();
+    const profile = agent.post('/api/save/profile', { name: 'Racer' });
+    await stall.reached;
 
-    // The flag is the only thing preventing a second payout, and it lives inside the document
-    // the profile write also rewrites. If that write clobbered it, the relink below pays again.
+    const linked = await link(agent, wallet);
+    expect(linked.bonusGranted).toBe(true);
+
+    stall.release();
+    expect((await profile).statusCode).toBe(200);
+
+    // `walletBonus` is the only thing preventing a second payout and it lives *inside* the
+    // document the profile write rewrites. If the stale copy won, the flag is back to false —
+    // and the relink below collects another 100 gems.
     const raced = (await store.getSave(userId))!.json;
-    expect(raced.walletBonus).toBe(true);
     expect(raced.name).toBe('Racer');
+    expect(raced.walletBonus).toBe(true);
     expect(raced.gem).toBe(gemsBefore + 100);
 
     await agent.post('/api/auth/wallet/unlink');

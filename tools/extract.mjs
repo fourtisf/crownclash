@@ -73,11 +73,15 @@ import { AW, AH, RIV_T, RIV_B, BRIDGE, arenaFor } from '@crown/shared';
 import { fitCanvas, rr, shade } from './art';
 
 /**
- * The slice reads \`S.trophies\` (to choose the arena palette) and assigns the module-level
- * \`arenaBG\`. Both are declared here so the slice itself stays untouched.
+ * The slice reads \`S.trophies\` (to pick the arena palette) and assigns the module-level
+ * \`arenaBG\` at the end of buildArenaBG(). Both are declared here so the slice stays untouched.
+ *
+ * \`arenaBG\` is exported as a \`let\` on purpose: ES module live bindings mean render.ts sees
+ * the new canvas the moment buildArenaBG() reassigns it, exactly as it saw the prototype's
+ * shared global. A getter would have worked too, but the slice writes \`arenaBG=cv\` verbatim.
  */
 let S = { trophies: 0 };
-let arenaBG = null;
+export let arenaBG = null;
 
 export function setArenaTrophies(t) { S = { trophies: t | 0 }; }
 export function getArenaBG() { return arenaBG; }
@@ -91,10 +95,18 @@ export { buildArenaBG };
     from: 2060,
     to: 2226,
     prelude: `${BANNER}
-import { AW, AH, RIV_B, CARD, clamp, lerp, rnd, dist } from '@crown/shared';
+import { AW, AH, RIV_B, CARD, clamp, lerp } from '@crown/shared';
 import { towerAlive as simTowerAlive, canDeployAt as simCanDeployAt } from '@crown/shared';
 import { Art, rr, ell } from './art';
-import { getArenaBG } from './arenaBg';
+import { arenaBG } from './arenaBg';
+
+/**
+ * Presentation-only randomness (screen shake). Deliberately NOT \`Rng\` from @crown/shared:
+ * shared exposes randomness solely on a seeded stream so no simulation code can reach for an
+ * unseeded one. Jitter on a camera shake has no bearing on the match result, so it uses
+ * Math.random directly and stays out of the seeded stream entirely.
+ */
+const rnd = (a, b) => a + Math.random() * (b - a);
 
 /**
  * \`B\` is the battle facade the screen assigns before each frame: the shared sim's state
@@ -121,7 +133,11 @@ export { render, unitTopY, drawBar };
     from: 1342,
     to: 1374,
     prelude: `${BANNER}
-import { rnd } from '@crown/shared';
+/**
+ * Presentation-only randomness — see the note in render.ts. \`Snd.hit()\` detunes each blip
+ * with \`rnd(220,320)\`; that must never touch the simulation's seeded stream.
+ */
+const rnd = (a, b) => a + Math.random() * (b - a);
 
 /** The slice gates every cue on \`S.sfx\`; the screen keeps this mirror in sync with the save. */
 let S = { sfx: true };

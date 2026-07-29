@@ -16,7 +16,7 @@
  *    integration looked.
  */
 import {
-  AH, AW, CARD, DT, TICK_HZ, Sim, aiUpdate, cardLevel, clamp,
+  AH, AW, CARD, DT, Sim, aiUpdate, clamp,
 } from '@crown/shared';
 import type { DeployLogEntry, MatchStartResponse, Unit } from '@crown/shared';
 import { $, must } from './dom';
@@ -494,8 +494,9 @@ function loop(ts: number): void {
 function drawInterpolated(alpha: number): void {
   if (!B || !aCtx) return;
   const units = B.sim.state.units as Unit[];
-  const projs = B.sim.state.projs;
 
+  // Projectiles are deliberately not interpolated: they travel 11-26 tiles/s, so a whole
+  // tick of motion is under half a tile, and the prototype drew them from raw positions too.
   if (alpha > 0) {
     for (let i = 0; i < units.length; i++) {
       const u = units[i] as Unit & { px?: number; py?: number };
@@ -516,11 +517,8 @@ function drawInterpolated(alpha: number): void {
       units[i].y = scratchY[i];
     }
   }
-  void projs;
 }
 
 export function currentBattle(): BattleView | null {
   return B;
 }
-
-export { TICK_HZ, cardLevel, Art };

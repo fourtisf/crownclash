@@ -11,10 +11,18 @@
 // @ts-nocheck
 /* eslint-disable */
 
-import { AW, AH, RIV_B, CARD, clamp, lerp, rnd, dist } from '@crown/shared';
+import { AW, AH, RIV_B, CARD, clamp, lerp } from '@crown/shared';
 import { towerAlive as simTowerAlive, canDeployAt as simCanDeployAt } from '@crown/shared';
 import { Art, rr, ell } from './art';
-import { getArenaBG } from './arenaBg';
+import { arenaBG } from './arenaBg';
+
+/**
+ * Presentation-only randomness (screen shake). Deliberately NOT `Rng` from @crown/shared:
+ * shared exposes randomness solely on a seeded stream so no simulation code can reach for an
+ * unseeded one. Jitter on a camera shake has no bearing on the match result, so it uses
+ * Math.random directly and stays out of the seeded stream entirely.
+ */
+const rnd = (a, b) => a + Math.random() * (b - a);
 
 /**
  * `B` is the battle facade the screen assigns before each frame: the shared sim's state

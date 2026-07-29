@@ -11,7 +11,11 @@
 // @ts-nocheck
 /* eslint-disable */
 
-import { rnd } from '@crown/shared';
+/**
+ * Presentation-only randomness — see the note in render.ts. `Snd.hit()` detunes each blip
+ * with `rnd(220,320)`; that must never touch the simulation's seeded stream.
+ */
+const rnd = (a, b) => a + Math.random() * (b - a);
 
 /** The slice gates every cue on `S.sfx`; the screen keeps this mirror in sync with the save. */
 let S = { sfx: true };

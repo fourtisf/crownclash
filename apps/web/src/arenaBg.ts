@@ -15,11 +15,15 @@ import { AW, AH, RIV_T, RIV_B, BRIDGE, arenaFor } from '@crown/shared';
 import { fitCanvas, rr, shade } from './art';
 
 /**
- * The slice reads `S.trophies` (to choose the arena palette) and assigns the module-level
- * `arenaBG`. Both are declared here so the slice itself stays untouched.
+ * The slice reads `S.trophies` (to pick the arena palette) and assigns the module-level
+ * `arenaBG` at the end of buildArenaBG(). Both are declared here so the slice stays untouched.
+ *
+ * `arenaBG` is exported as a `let` on purpose: ES module live bindings mean render.ts sees
+ * the new canvas the moment buildArenaBG() reassigns it, exactly as it saw the prototype's
+ * shared global. A getter would have worked too, but the slice writes `arenaBG=cv` verbatim.
  */
 let S = { trophies: 0 };
-let arenaBG = null;
+export let arenaBG = null;
 
 export function setArenaTrophies(t) { S = { trophies: t | 0 }; }
 export function getArenaBG() { return arenaBG; }

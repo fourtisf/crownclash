@@ -1,0 +1,132 @@
+// Crown Clash — production schema (handoff §4, extended).
+//
+// Three principles govern the shape here:
+//
+//  1. `Save.json` is the prototype's `S` object 1:1 (handoff §4) so the client needs no
+//     remapping. `trophies` / `best` are *denormalised copies* of two fields inside that
+//     JSON — Postgres cannot index into a Json column efficiently enough for a leaderboard,
+//     and every write goes through one helper that keeps the two in sync.
+//  2. A match is an audit record, not a scoreboard entry. Everything needed to prove why a
+//     player was paid (or not) is stored: the seed, the exact SimConfig frozen at start, the
+//     submitted log, the server's own result hash, and the reward seed. Given those five a
+//     result is reproducible offline, months later.
+//  3. Identity is one row. A guest and a wallet user are the same `User`; linking a wallet
+//     mutates the row rather than creating a second one, which is what makes "clear cookies,
+//     sign in with the wallet, save intact" work.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String @id @default(cuid())
+  /// Client-generated, stored in IndexedDB. For wallet-first accounts (no guest session
+  /// ever existed) this is the synthetic `wallet:<kind>:<address>` so the column stays
+  /// NOT NULL without inventing a fake device.
+  deviceId String @unique
+
+  /// Lower-cased for EVM, verbatim base58 for Solana (base58 is case-significant).
+  /// `@unique` is what enforces "one wallet, one account" — the walletTaken check reads it.
+  wallet          String? @unique
+  walletKind      String?
+  airdropEligible Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  save    Save?
+  matches Match[]
+}
+
+model Save {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The prototype's `S` object, verbatim shape.
+  json Json
+
+  /// Denormalised from `json` purely so the leaderboard can be a plain indexed scan.
+  trophies Int @default(0)
+  best     Int @default(0)
+
+  /// One-time local-save import (handoff §3.2). Once true, `/api/save/migrate` refuses.
+  migrated   Boolean   @default(false)
+  migratedAt DateTime?
+  /// `sanitizeSave()` findings from the migration, e.g. `gold:999999999->50000`.
+  /// Kept rather than discarded: a clamped value is evidence, not a rounding error (§5).
+  sanitizeFlags String[] @default([])
+
+  updatedAt DateTime @updatedAt
+
+  @@index([trophies(sort: Desc)])
+}
+
+model Match {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Server-generated (`randomSeed()`). The client never chooses it — a chosen seed is a
+  /// chosen AI opening and a chosen deck shuffle.
+  seed String
+  mode String @default("ai") // "ai" | "pvp"
+
+  /// The full `SimConfig` frozen at /match/start: deck, per-card levels, king level, AI deck
+  /// index and AI level. Re-simulation reads THIS, never anything the client sends at
+  /// finish, so levelling up mid-match cannot retroactively buff the replay.
+  config     Json
+  aiDeck     Json?
+  aiLevel    Int   @default(1)
+  arenaIndex Int   @default(0)
+  /// Cosmetic opponent identity shown in the matchmaking modal (name/avatar/trophies).
+  opponent   Json?
+
+  deployLog Json?
+  result    String? // "win" | "lose" | "draw"
+  crowns    Json? // [player, ai]
+
+  /// True only when the re-sim ran to completion on a structurally legal log.
+  validated  Boolean @default(false)
+  /// Set instead of `validated` when the log was rejected. Prefixed by stage:
+  /// `log:*` (structural), `sim:*` (illegal during replay), `expired` (never finished).
+  voidReason String?
+  /// `Sim.hash()` of the server's own final state. The worker re-runs the match a second
+  /// time and compares — a mismatch means the sim stopped being deterministic.
+  resultHash String?
+
+  /// Separate from `seed` on purpose: if the reward roll came off the match seed the client
+  /// could compute its win-chest rarity before deciding to submit the log.
+  rewardSeed  String?
+  trophyDelta Int?
+
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([finishedAt])
+}
+
+/// Single-use challenge for wallet signature login (handoff §3.3).
+///
+/// The full message is stored, not just the nonce: verification runs against the *stored*
+/// text so a client cannot sign one message and submit another. Rows are consumed by an
+/// atomic conditional update, which is what makes replay impossible under concurrency.
+model WalletNonce {
+  nonce   String @id
+  address String
+  kind    String // "evm" | "solana"
+  message String
+
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([address])
+  @@index([expiresAt])
+}

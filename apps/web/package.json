@@ -8,8 +8,9 @@
     "build": "vite build",
     "preview": "vite preview --port 4173",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
-    "e2e": "playwright test"
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@crown/shared": "workspace:*"

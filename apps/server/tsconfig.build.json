@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // rootDir "." in tsconfig.json is what makes `tsc` emit dist/src/*, and it is there so
+    // typecheck also covers test/. The production build must not ship the test suite, so it
+    // narrows the input to src/ while keeping the same output layout the PM2 config expects.
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts"]
+}

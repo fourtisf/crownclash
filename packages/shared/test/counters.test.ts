@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { CARD, CARDS, advantage, matchups } from '../src/index.js';
+import { CARD, CARDS, advantage, deckWarnings, defaultState, matchups } from '../src/index.js';
 import type { Card } from '../src/index.js';
 
 const strongOf = (id: string): string[] => matchups(CARD[id]).strong;
@@ -149,5 +149,63 @@ describe('the matchups the feature exists to teach', () => {
     expect(strongOf('volley')).not.toContain('archers');
     // Meteor's 620 covers the Archers, so it is their answer where Volley is not.
     expect(strongOf('meteor')).toContain('archers');
+  });
+});
+
+describe('deck check', () => {
+  const OK = ['ironclad', 'archers', 'sprites', 'bones', 'wisps', 'volley', 'colossus', 'jolt'];
+
+  it('passes a deck that covers the basics', () => {
+    expect(deckWarnings(OK)).toEqual([]);
+  });
+
+  it('is the starter deck actually playable?', () => {
+    // If the deck a brand-new account is handed trips a warning, the warning is wrong or the
+    // starter deck is — either way somebody needs to know before a player sees it.
+    expect(deckWarnings(defaultState().deck)).toEqual([]);
+  });
+
+  it('catches a deck that cannot touch air', () => {
+    // Every card ground-only, and no spell to reach a flier with. `canHit` (sim.ts L326) makes
+    // this deck *physically unable* to remove a Wisp — it is not a bad matchup, it is no
+    // matchup.
+    const grounded = ['ironclad', 'sprites', 'bones', 'warden', 'blademaster', 'lancer', 'colossus', 'boar'];
+    expect(deckWarnings(grounded)).toContain('noAir');
+    // A single spell is enough to fix it, because a spell hits everything.
+    expect(deckWarnings([...grounded.slice(0, 7), 'volley'])).not.toContain('noAir');
+  });
+
+  it('catches a deck with nothing that can threaten a tower', () => {
+    const noThreat = ['archers', 'sprites', 'bones', 'wisps', 'spears', 'volley', 'jolt', 'turret'];
+    expect(deckWarnings(noThreat)).toContain('noWin');
+    // A build-seeker is a win condition; so is anything with the health to walk through a
+    // defence.
+    expect(deckWarnings([...noThreat.slice(0, 7), 'boar'])).not.toContain('noWin');
+    expect(deckWarnings([...noThreat.slice(0, 7), 'ironclad'])).not.toContain('noWin');
+  });
+
+  it('catches a deck with no spell and one that is too expensive', () => {
+    const spellless = ['ironclad', 'archers', 'sprites', 'bones', 'wisps', 'turret', 'colossus', 'warden'];
+    expect(deckWarnings(spellless)).toContain('noSpell');
+
+    const heavy = ['behemoth', 'colossus', 'lancer', 'pyromancer', 'stormtitan', 'warden', 'meteor', 'drakeling'];
+    const w = deckWarnings(heavy);
+    expect(w).toContain('heavy');
+    expect(w).toContain('noCheap');
+  });
+
+  it('says nothing about a deck too short to judge', () => {
+    expect(deckWarnings([])).toEqual([]);
+    expect(deckWarnings(['ironclad'])).toEqual([]);
+    // Unknown ids are skipped rather than crashing — a save can hold a card that no longer
+    // exists, and `ensurePlayableDeck` repairs it elsewhere.
+    expect(() => deckWarnings(['nope', 'alsonope'])).not.toThrow();
+  });
+
+  it('leads with the warning that loses the most matches', () => {
+    const worst = ['ironclad', 'sprites', 'bones', 'warden', 'blademaster', 'lancer', 'colossus', 'boar'];
+    // No air cover, no spell, no cheap card — but air is the one that makes matches unwinnable
+    // rather than merely awkward, so it comes first.
+    expect(deckWarnings(worst)[0]).toBe('noAir');
   });
 });

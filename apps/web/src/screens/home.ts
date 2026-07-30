@@ -25,6 +25,7 @@ import { cardNode } from './cards';
 import { openChestFlow } from './chest';
 import { findMatch } from './matchmaking';
 import { bindLeaderboardEntry, openLeaderboard, renderLeaderboardBlock } from './leaderboard';
+import { renderHistoryBlock, watchReplay } from './history';
 import { openSettings } from './settings';
 import { openWallet } from './wallet';
 
@@ -155,6 +156,11 @@ function bindHomeOnce(): void {
     // `#btnBattle` lives inside the markup `setTab('home')` re-injects, so the listener has
     // to sit on the container and delegate — that part of the prototype was right.
     if (target && typeof target.closest === 'function' && target.closest('#btnBattle')) void findMatch();
+    // Battle-log rows are re-rendered on every visit to Home, so they get the same treatment.
+    // Binding to `#histBlock` itself looked fine and silently stopped working after the first
+    // re-render, because the element the listener was on had been replaced (B1, again).
+    const hrow = target?.closest?.<HTMLElement>('.hrow');
+    if (hrow && !hrow.classList.contains('dead') && hrow.dataset.match) void watchReplay(hrow.dataset.match);
   });
 }
 
@@ -191,6 +197,10 @@ export function refreshHome(): void {
   const lb = $('#lbBlock');
   if (lb) void renderLeaderboardBlock(lb);
   bindLeaderboardEntry();
+
+  // Same treatment: the battle log is worth having but nothing waits on it.
+  const hist = $('#histBlock');
+  if (hist) void renderHistoryBlock(hist);
 }
 
 /* -------------------------------------------------------------------- chests */

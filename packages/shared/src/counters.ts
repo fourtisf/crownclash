@@ -20,7 +20,7 @@
  * Levels cancel: both sides scale by `statMul(lv)`, so every ratio below is level-independent
  * and the numbers are read straight off the card at level 1.
  */
-import { CARDS, RIV_B, TOWER_POS } from './data.js';
+import { CARD, CARDS, RIV_B, TOWER_POS } from './data.js';
 import type { Card } from './types.js';
 
 /**
@@ -226,5 +226,51 @@ export function matchups(card: Card): Matchups {
   }
   const out: Matchups = { strong: rank(strong), weak: rank(weak) };
   cache.set(card.id, out);
+  return out;
+}
+
+/* ------------------------------------------------------------------ deck check */
+
+export type DeckWarning = 'noAir' | 'noWin' | 'noSpell' | 'noCheap' | 'heavy';
+
+/**
+ * What is structurally missing from a deck.
+ *
+ * Eight slots out of 21 cards is a real decision and the game offered no guidance on it at
+ * all, so a new player could sit at 700 trophies for a week wondering why they kept losing to
+ * a card they had no answer to. These are not opinions about the metagame — each one is a
+ * mechanical hole that `sim.ts` will punish every single match:
+ *
+ *  - **noAir** is the big one. `canHit` (L326) makes a ground-only unit physically unable to
+ *    touch a flier, so a deck without a single `tg:'both'` card or damaging spell literally
+ *    cannot remove Wisps or a Drakeling. It watches them hit the tower.
+ *  - **noWin** — nothing that seeks buildings and nothing that survives the walk. Chip damage
+ *    can win on crowns, but a deck with no way to threaten a tower has to be told so.
+ *  - **noSpell** — a spell is the only thing that clears a landed swarm instantly.
+ *  - **noCheap** / **heavy** — elixir regenerates at 1 per 2.8 s and caps at 10. A deck with
+ *    no 2-cost card, or a high average, spends most of the match unable to answer anything.
+ *
+ * Ordered by how badly each one loses matches, so the first warning is the one worth fixing.
+ */
+export function deckWarnings(deck: string[]): DeckWarning[] {
+  const cards = deck.map((id) => CARD[id]).filter(Boolean);
+  if (cards.length < 2) return [];
+  const out: DeckWarning[] = [];
+
+  const hitsAir = cards.some((c) => (c.t === 'spell' && (c.dmg ?? 0) > 0) || (c.t !== 'spell' && c.tg === 'both'));
+  if (!hitsAir) out.push('noAir');
+
+  // A win condition is either a build-seeker — which ignores defenders entirely — or a tank
+  // with enough health to reach a tower through them.
+  const hasWin = cards.some((c) => c.tg === 'build' || (c.hp ?? 0) >= 1500);
+  if (!hasWin) out.push('noWin');
+
+  if (!cards.some((c) => c.t === 'spell')) out.push('noSpell');
+
+  const avg = cards.reduce((a, c) => a + c.cost, 0) / cards.length;
+  if (!cards.some((c) => c.cost <= 2)) out.push('noCheap');
+  // 4.2 is the point past which a full hand costs more than the elixir bar holds.
+  if (avg > 4.2) out.push('heavy');
+
   return out;
 }

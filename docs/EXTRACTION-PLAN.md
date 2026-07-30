@@ -111,6 +111,40 @@ re-simulated. The port makes the sim a **fixed-step pure function**:
 | **D9** | — | Overtime uses `B.t = 60` while `B.mult` is chosen by `phase === 'over' ? 3 : (t <= 60 ? 2 : 1)`. Phase check precedes the time check, so OT is ×3 not ×2. | Verbatim. |
 | **D10** | — | `timeUp()` tiebreak compares **lowest surviving tower HP fraction**, not total HP lost as §2 states. `lo1 < lo0 → win`. | Verbatim (`hp/maxHp` minimum). |
 
+### D11 — AI difficulty and opponent variety (deliberate divergence, owner-approved)
+
+Two prototype constants are **not** carried over verbatim. Both are data, not mechanics; no
+card's stats changed and `data-parity.test.ts` still proves every prototype AI deck survives.
+
+**`aiLevelFor` — L1440 was `1 + floor(trophies / 240)`.** Linear in trophies, while card
+upgrades cost roughly double per level, which makes player power logarithmic in resources.
+`tools/economy-sim.mjs` plays the real economy through the real `applyMatchRewards` /
+`rollChest` / `upgradeCard` and measured the divergence:
+
+| arena | player deck lv | old AI lv | old advantage | new AI lv | new advantage |
+|---|---|---|---|---|---|
+| Goblin Stadium | 3.6 | 2 | 0.73× | 3 | 0.89× |
+| Bone Pit | 4.4 | 3 | 0.77× | 4 | 0.93× |
+| Frozen Peak | 4.9 | 6 | 1.24× | 5 | 1.02× |
+| Ember Forge | 5.3 | 8 | 1.69× | 6 | 1.15× |
+| Royal Arena | 5.9 | 11 | **2.66×** | 7 | 1.24× |
+| Legendary Arena | 6.0 | 13 | **3.80×** | 8 | 1.46× |
+
+A player asymptotes near level 6; the AI marched to 13. Past Ember Forge the ladder was not
+difficult, it was closed — and the measurement above is already generous (55% win rate, 25
+matches a day, every quest and free chest claimed, optimal gold spending). The prototype was a
+demo where nobody ever ground to 2,600 trophies, so this formula had never met a real economy.
+The replacement is an interpolated curve anchored to that measured progression.
+`packages/shared/test/balance.test.ts` re-runs the economy model and fails if any arena drifts
+outside its band, so a future change to a chest or an upgrade cost cannot silently reopen it.
+
+**`aiDeckIndexFor` — L1446 was `min(arenaIndex, AI_DECKS.length - 1)`.** A pure function of the
+arena, so a player met the *same eight cards* every match for their entire stay in it —
+sometimes forty times running, with random names and avatars papering over it. `AI_DECKS` grew
+from 6 to 12 (two per tier, built from the same 21 cards) and the choice is now randomised
+within a tier band off a server-side stream. The index is still frozen into the `Match` row, so
+re-simulation at finish replays the exact deck that was played against.
+
 ### Prototype bugs being fixed in the port (with rationale)
 
 | # | Bug | Fix |

@@ -176,3 +176,43 @@ test.describe('account recovery', () => {
     await expect(page.locator('#rcErr')).toContainText('does not match');
   });
 });
+
+test.describe('battle log and replays', () => {
+  test.setTimeout(240_000);
+
+  test('a finished match appears in the log and plays back', async ({ page }) => {
+    await enterApp(page);
+
+    // Give up rather than play three minutes: a conceded match is still validated and still
+    // has a legal deploy log, so it is replayable exactly like any other.
+    await page.locator('#btnBattle').click();
+    await expect(page.locator('#battle.on')).toBeVisible({ timeout: 30_000 });
+    const skip = page.locator('#coachSkip');
+    if (await skip.isVisible().catch(() => false)) await skip.click();
+
+    await page.locator('#giveUp').click();
+    await page.locator('#guYes').click();
+    await expect(page.locator('.resbanner')).toHaveText('DEFEAT', { timeout: 60_000 });
+    await page.locator('#resHome').click();
+
+    // The match is now in the battle log on Home.
+    const row = page.locator('#histBlock .hrow').first();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row).toHaveClass(/lose/);
+
+    // Tapping it replays the match: back on the battle screen, with the replay transport and
+    // no give-up button, because there is nothing live to give up.
+    await row.click();
+    await expect(page.locator('#battle.on')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('#replayBar')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#giveUp')).toBeHidden();
+
+    // Speed is a transport control, not a simulation change — it just cycles.
+    await page.locator('#rbSpeed').click();
+    await expect(page.locator('#rbSpeed')).toHaveText('2×');
+
+    await page.locator('#rbExit').click();
+    await expect(page.locator('#home.on')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#replayBar')).toBeHidden();
+  });
+});

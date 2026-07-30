@@ -231,6 +231,14 @@ export class MemoryStore implements Store {
     Object.assign(m, clone(patch));
   }
 
+  async recentMatches(userId: string, limit: number): Promise<MatchRow[]> {
+    return [...this.matches.values()]
+      .filter((m) => m.userId === userId && m.finishedAt)
+      .sort((a, b) => (b.finishedAt!.getTime() - a.finishedAt!.getTime()) || (a.id < b.id ? 1 : -1))
+      .slice(0, limit)
+      .map((m) => ({ ...m }));
+  }
+
   async expireMatches(before: Date, at: Date): Promise<number> {
     let n = 0;
     for (const m of this.matches.values()) {

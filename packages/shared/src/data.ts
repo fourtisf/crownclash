@@ -8,6 +8,7 @@
  *
  * Line references below point at the prototype.
  */
+import type { Rng } from './rng.js';
 import type {
   Arena,
   Card,
@@ -175,14 +176,44 @@ export const TOWER_POS: { team: 0 | 1; kind: TowerKind; x: number; y: number; si
 ];
 
 /* ---------------------------------------------------------------- L1395-1403 */
+/**
+ * Opponent decks, ordered by tier — index 0 is the softest, the last is the hardest.
+ *
+ * The prototype shipped the first six (L1395-1403) and picked one by arena index with no
+ * randomness at all, so a player grinding a single arena met the *same eight cards* every
+ * match, sometimes forty times running. The random names and avatars made that worse rather
+ * than better: it looked like variety and was not.
+ *
+ * Twelve now, two per tier, chosen from a band (`aiDeckIndexFor`). Every added deck is built
+ * from the same 21 cards and follows the same shape as the originals — a win condition, a
+ * tank or a swarm to defend with, air cover, and a spell — so this widens the pool without
+ * touching what any card does.
+ */
 export const AI_DECKS: string[][] = [
+  // Tier 0 — Training Camp / Goblin Stadium
   ['ironclad', 'archers', 'sprites', 'bones', 'wisps', 'volley', 'colossus', 'jolt'],
+  ['ironclad', 'spears', 'sprites', 'turret', 'wisps', 'volley', 'warden', 'jolt'],
+  // Tier 1 — Bone Pit
   ['boar', 'warden', 'archers', 'spears', 'meteor', 'jolt', 'turret', 'wisps'],
+  ['colossus', 'archers', 'bones', 'sprites', 'volley', 'jolt', 'ironclad', 'wisps'],
+  // Tier 2 — Frozen Peak
   ['colossus', 'sharpshooter', 'drakeling', 'warden', 'meteor', 'jolt', 'sprites', 'bones'],
+  ['boar', 'pyromancer', 'wisps', 'ironclad', 'volley', 'jolt', 'spears', 'turret'],
+  // Tier 3 — Ember Forge
   ['lancer', 'blademaster', 'wisps', 'volley', 'sharpshooter', 'turret', 'jolt', 'ironclad'],
+  ['colossus', 'pyromancer', 'drakeling', 'bones', 'meteor', 'jolt', 'archers', 'warden'],
+  // Tier 4 — Royal Arena
   ['behemoth', 'drakeling', 'pyromancer', 'warden', 'meteor', 'jolt', 'archers', 'bones'],
+  ['lancer', 'stormtitan', 'wisps', 'warden', 'volley', 'jolt', 'sprites', 'turret'],
+  // Tier 5 — Legendary Arena
   ['voidblade', 'stormtitan', 'boar', 'warden', 'meteor', 'volley', 'sprites', 'turret'],
+  ['behemoth', 'voidblade', 'pyromancer', 'sharpshooter', 'meteor', 'jolt', 'wisps', 'bones'],
 ];
+
+/** Decks per difficulty tier. `AI_DECKS` is grouped, so tier `t` starts at `t * AI_DECKS_PER_TIER`. */
+export const AI_DECKS_PER_TIER = 2;
+/** Six tiers across seven arenas — the top two arenas share the hardest one. */
+export const AI_TIERS = AI_DECKS.length / AI_DECKS_PER_TIER;
 
 export const AI_NAMES: string[] = ['DragonSlayer', 'xX_Reaper_Xx', 'StormBringer', 'ElixirGolem', 'NoobMaster69', 'LordOfCrowns', 'GrandMarshal', 'Zeus', 'MetaAbuser', 'WhaleTrader', 'GG_Vortex', 'KingRobin'];
 
@@ -207,12 +238,75 @@ export const ELIX_RATE = 1 / 2.8;
 export const TICK_HZ = 30;
 export const DT = 1 / TICK_HZ;
 
-/** L1440 — AI card/tower level from the player's trophies. */
+/**
+ * How strong the opponent's cards are, from the player's trophies.
+ *
+ * The prototype's L1440 was `1 + floor(trophies / 240)`: **linear** in trophies. Card upgrades
+ * cost roughly double per level, which makes a player's power **logarithmic** in the resources
+ * they earn. Two curves shaped like that diverge, and `tools/economy-sim.mjs` — which plays
+ * the real economy through the real `applyMatchRewards`/`rollChest`/`upgradeCard` — measured
+ * exactly where:
+ *
+ *   arena            player deck lv   old AI lv   AI stat advantage
+ *   Goblin Stadium        3.6              2          0.73x
+ *   Bone Pit              4.4              3          0.77x
+ *   Frozen Peak           4.9              6          1.24x
+ *   Ember Forge           5.3              8          1.69x
+ *   Royal Arena           5.9             11          2.66x
+ *   Legendary Arena       6.0             13          3.80x
+ *
+ * A player asymptotes near level 6; the AI marched to 13. Past Ember Forge the ladder was not
+ * difficult, it was closed — and that measurement is already generous (55% win rate, 25
+ * matches a day, every quest and free chest claimed, gold always spent on the cheapest
+ * available upgrade).
+ *
+ * The curve below is anchored to that measured player progression instead, with a deliberate
+ * offset: the opponent is *behind* the player in the first two arenas, level with them in the
+ * middle, and ahead at the top so the ladder still has a summit worth climbing. Interpolated
+ * between anchors so there are no difficulty cliffs at arena boundaries.
+ *
+ * `test/balance.test.ts` re-runs the same economy model and fails if any arena drifts outside
+ * the intended band, so this cannot silently rot the next time a chest or a cost changes.
+ */
+const AI_LEVEL_CURVE: { t: number; lv: number }[] = [
+  { t: 0, lv: 1 },
+  { t: 300, lv: 3 },
+  { t: 700, lv: 4 },
+  { t: 1200, lv: 5 },
+  { t: 1800, lv: 6 },
+  { t: 2600, lv: 7 },
+  { t: 3600, lv: 8 },
+];
+
 export function aiLevelFor(trophies: number): number {
-  return Math.min(13, Math.max(1, 1 + Math.floor(trophies / 240)));
+  const t = Math.max(0, trophies);
+  const last = AI_LEVEL_CURVE[AI_LEVEL_CURVE.length - 1];
+  if (t >= last.t) return Math.min(MAX_CARD_LEVEL, last.lv);
+  let i = 0;
+  while (i < AI_LEVEL_CURVE.length - 1 && t >= AI_LEVEL_CURVE[i + 1].t) i++;
+  const a = AI_LEVEL_CURVE[i];
+  const b = AI_LEVEL_CURVE[i + 1];
+  const f = (t - a.t) / (b.t - a.t);
+  return Math.min(MAX_CARD_LEVEL, Math.max(1, Math.round(a.lv + (b.lv - a.lv) * f)));
 }
 
-/** L1446 — AI deck is chosen by arena index, clamped into AI_DECKS. */
-export function aiDeckIndexFor(arenaIndex: number): number {
-  return Math.min(Math.max(arenaIndex, 0), AI_DECKS.length - 1);
+/**
+ * Pick an opponent deck for an arena.
+ *
+ * Replaces L1446's `min(arenaIndex, AI_DECKS.length - 1)`, which was a pure function of the
+ * arena and therefore handed a player the identical eight cards for their entire stay in it.
+ *
+ * The band is this arena's tier plus the one below, so an opponent is always appropriate to
+ * where the player is but never the same twice running by construction. `rng` comes off the
+ * match seed, which the server generates and freezes into the `Match` row — so the choice is
+ * unpredictable to the client and still perfectly reproducible when the log is re-simulated.
+ *
+ * Called without an `rng` it returns the tier's first deck, which keeps every existing caller
+ * and every fixture deterministic.
+ */
+export function aiDeckIndexFor(arenaIndex: number, rng?: Rng): number {
+  const tier = Math.min(Math.max(arenaIndex, 0), AI_TIERS - 1);
+  const lo = Math.max(0, tier - 1) * AI_DECKS_PER_TIER;
+  const hi = tier * AI_DECKS_PER_TIER + (AI_DECKS_PER_TIER - 1);
+  return rng ? rng.rndi(lo, hi) : tier * AI_DECKS_PER_TIER;
 }

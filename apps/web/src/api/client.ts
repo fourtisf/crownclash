@@ -17,6 +17,7 @@
 import { API_ERRORS, API_PREFIX } from '@crown/shared';
 import type {
   ApiError, AuthResponse, ChestOpenRequest, ChestOpenResponse, LeaderboardResponse,
+  MatchHistoryResponse, MatchReplayResponse,
   LoginClaimResponse, MatchFinishRequest, MatchFinishResponse, MatchStartResponse,
   ProfileUpdateRequest, QuestClaimRequest, QuestClaimResponse, RecoveryCreateResponse,
   SaveResponse, ShopBuyRequest,
@@ -108,6 +109,10 @@ export const api = {
   claimQuest: (req: QuestClaimRequest) => post<QuestClaimResponse>('/quest/claim', req),
   claimLogin: () => post<LoginClaimResponse>('/login/claim'),
   upgradeCard: (req: UpgradeCardRequest) => post<UpgradeCardResponse>('/cards/upgrade', req),
+
+  /* history + replay */
+  matchHistory: () => get<MatchHistoryResponse>('/match/history'),
+  matchReplay: (matchId: string) => get<MatchReplayResponse>(`/match/${encodeURIComponent(matchId)}/replay`),
 
   /* leaderboard */
   leaderboard: () => get<LeaderboardResponse>('/leaderboard'),

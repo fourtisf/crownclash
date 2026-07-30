@@ -7,8 +7,9 @@
  */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
-  API_ERRORS, CARD, SHOP, defaultState,
-  type MatchFinishResponse, type MatchStartResponse, type SaveResponse, type SimConfig,
+  AI_DECKS_PER_TIER, API_ERRORS, CARD, SHOP, aiLevelFor, aiUpdate, defaultState, runMatch,
+  type MatchFinishResponse, type MatchHistoryResponse, type MatchReplayResponse,
+  type MatchStartResponse, type SaveResponse, type SimConfig,
 } from '@crown/shared';
 import { Agent, elixirOverdraftLog, firstNonSpell, guest, honestLog, json, makeRig, type TestRig } from './helpers.js';
 
@@ -46,8 +47,10 @@ describe('POST /api/match/start', () => {
   it('issues a server-generated seed and an AI derived from the player’s trophies', async () => {
     const { start } = await startMatch();
     expect(start.seed).toMatch(/^[0-9a-f]{32}$/);
-    // A brand-new account sits in arena 0 at 0 trophies.
-    expect(start.aiDeckIndex).toBe(0);
+    // A brand-new account sits in arena 0 at 0 trophies, so the opponent comes from tier 0 —
+    // one of two decks now, not a fixed one.
+    expect(start.aiDeckIndex).toBeGreaterThanOrEqual(0);
+    expect(start.aiDeckIndex).toBeLessThan(AI_DECKS_PER_TIER);
     expect(start.aiLevel).toBe(1);
     expect(start.myDeck).toEqual(defaultState().deck);
     expect(start.myKingLevel).toBe(1);
@@ -299,16 +302,32 @@ describe('POST /api/match/finish — replay and ownership', () => {
 });
 
 describe('trophy-derived matchmaking', () => {
-  it('scales the AI deck and level with the player’s arena', async () => {
+  it('scales the AI deck tier and level with the player’s arena', async () => {
     const user = (await rig.store.userByDeviceId('device-match-0001'))!;
     await rig.store.putSave(user.id, { ...defaultState(), trophies: 2700, best: 2700, lvl: 6 });
 
     const { start } = await startMatch();
-    // 2600 = Royal Arena (index 5); AI_DECKS has 6 entries so the index clamps there too.
-    expect(start.aiDeckIndex).toBe(5);
-    // L1440 — clamp(1 + floor(2700/240), 1, 13) = 12.
-    expect(start.aiLevel).toBe(12);
+    // 2700 = Royal Arena (index 5). The band is that tier plus the one below, so decks 8-11 —
+    // never a beginner deck, never one from above where the player is.
+    expect(start.aiDeckIndex).toBeGreaterThanOrEqual(4 * AI_DECKS_PER_TIER);
+    expect(start.aiDeckIndex).toBeLessThan(6 * AI_DECKS_PER_TIER);
+    // The curve is anchored to measured player progression now (packages/shared/test/
+    // balance.test.ts): the prototype's `1 + floor(2700/240)` = 12 was a 2.7x stat advantage
+    // over a realistically-levelled deck, which made Royal Arena unwinnable rather than hard.
+    expect(start.aiLevel).toBe(aiLevelFor(2700));
+    expect(start.aiLevel).toBeLessThan(12);
     expect(start.myKingLevel).toBe(6);
+  });
+
+  it('does not send the player the same opponent deck every match', async () => {
+    // The whole reason the deck moved off `arenaIndex`: a pure function of the arena meant a
+    // player grinding one arena met the identical eight cards every single time.
+    const user = (await rig.store.userByDeviceId('device-match-0001'))!;
+    await rig.store.putSave(user.id, { ...defaultState(), trophies: 1300, best: 1300 });
+
+    const seen = new Set<number>();
+    for (let i = 0; i < 25; i++) seen.add((await startMatch()).start.aiDeckIndex);
+    expect(seen.size, 'every match served the same deck').toBeGreaterThan(1);
   });
 });
 
@@ -316,5 +335,74 @@ describe('shop indices stay in range', () => {
   it('rejects an index past the end of SHOP', async () => {
     const res = await agent.post('/api/shop/buy', { index: SHOP.length });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('match history and replays', () => {
+  it('lists a finished match and hands back everything needed to replay it', async () => {
+    const { start } = await startMatch();
+    const log = honestLog(start);
+    const fin = json<MatchFinishResponse>(await agent.post('/api/match/finish', { matchId: start.matchId, deployLog: log }));
+    expect(fin.voided).toBeUndefined();
+
+    const history = json<MatchHistoryResponse>(await agent.get('/api/match/history'));
+    expect(history.matches).toHaveLength(1);
+    const row = history.matches[0];
+    expect(row.matchId).toBe(start.matchId);
+    expect(row.replayable).toBe(true);
+    expect(row.result).toBe(fin.result);
+
+    const replay = json<MatchReplayResponse>(await agent.get(`/api/match/${start.matchId}/replay`));
+    // Nothing here is generated for the replay: it is the frozen config and the very log the
+    // server already re-simulated to decide the result.
+    expect(replay.config.seed).toBe(start.seed);
+    expect(replay.config.myDeck).toEqual(start.myDeck);
+    expect(replay.config.aiDeckIndex).toBe(start.aiDeckIndex);
+    expect(replay.deployLog).toEqual(log);
+    expect(replay.result).toBe(fin.result);
+  });
+
+  it('replays to exactly the result the server recorded', async () => {
+    // The point of the whole feature: the client re-runs `runMatch` over these fields and must
+    // land on the same outcome, or it is showing the player a different match than they played.
+    const { start } = await startMatch();
+    const log = honestLog(start);
+    const fin = json<MatchFinishResponse>(await agent.post('/api/match/finish', { matchId: start.matchId, deployLog: log }));
+
+    const replay = json<MatchReplayResponse>(await agent.get(`/api/match/${start.matchId}/replay`));
+    const { sim, illegal } = runMatch(replay.config, replay.deployLog, aiUpdate);
+    expect(illegal).toBeFalsy();
+    expect(sim.state.endResult).toBe(fin.result);
+    expect(sim.state.crowns).toEqual(fin.crowns);
+  });
+
+  it('will not hand a replay to anyone but its owner', async () => {
+    const { start } = await startMatch();
+    await agent.post('/api/match/finish', { matchId: start.matchId, deployLog: honestLog(start) });
+
+    const stranger = await guest(rig.app, 'device-nosy-0001');
+    const res = await stranger.get(`/api/match/${start.matchId}/replay`);
+    // 404 rather than 403: a match belongs to an account, and confirming one exists is itself
+    // more than a stranger should learn.
+    expect(res.statusCode).toBe(404);
+    expect(json<MatchHistoryResponse>(await stranger.get('/api/match/history')).matches).toEqual([]);
+  });
+
+  it('lists a voided match but refuses to replay it', async () => {
+    const { start } = await startMatch();
+    // A log the validator rejects: the match is real and belongs in the history, but there is
+    // no legal sequence of events to play back.
+    const bad = elixirOverdraftLog(start);
+    const fin = json<MatchFinishResponse>(await agent.post('/api/match/finish', { matchId: start.matchId, deployLog: bad }));
+    expect(fin.voided).toBeTruthy();
+
+    const history = json<MatchHistoryResponse>(await agent.get('/api/match/history'));
+    // A voided match has no result, so it does not appear as a played match at all.
+    expect(history.matches.every((m) => m.replayable)).toBe(true);
+    expect((await agent.get(`/api/match/${start.matchId}/replay`)).statusCode).toBe(409);
+  });
+
+  it('404s an unknown match id', async () => {
+    expect((await agent.get('/api/match/does-not-exist/replay')).statusCode).toBe(404);
   });
 });

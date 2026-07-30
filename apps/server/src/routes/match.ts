@@ -25,7 +25,8 @@ import { z } from 'zod';
 import {
   AI_AVATARS, AI_DECKS, AI_NAMES, API_ERRORS, Rng, aiDeckIndexFor, aiLevelFor, aiUpdate, applyMatchRewards,
   arenaFor, deckLevels, randomSeed, runMatch, validateDeployLog, MATCH_SECONDS, OVERTIME_SECONDS, TICK_HZ,
-  type DeployLogEntry, type MatchFinishResponse, type MatchRewards, type MatchStartResponse, type SimConfig,
+  type DeployLogEntry, type MatchFinishResponse, type MatchHistoryResponse, type MatchReplayResponse,
+  type MatchRewards, type MatchStartResponse, type SimConfig,
 } from '@crown/shared';
 import { requireUser } from '../lib/auth.js';
 import { HttpError, SERVER_ERRORS, badRequest, unauthorized } from '../lib/errors.js';
@@ -33,6 +34,9 @@ import { LIMITS, limit } from '../lib/ratelimit.js';
 import { loadSave, mutateSave, repairSave } from '../lib/saves.js';
 import { RKEY } from '../lib/redis.js';
 import type { MatchRow, Store, UserRow } from '../lib/store.js';
+
+/** How many finished matches the history screen shows. One screenful on a phone. */
+const HISTORY_SIZE = 20;
 
 /** Hard ceiling for a concede tick: regulation + sudden death. */
 const MAX_MATCH_TICKS = (MATCH_SECONDS + OVERTIME_SECONDS) * TICK_HZ;
@@ -92,10 +96,15 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
       const user = await requireUserRow(store, req);
       const { save } = await loadSave(store, user);
 
-      // L1439-1446 — arena, AI deck and AI level all derive from the player's trophies.
+      // L1439-1446 — arena and AI level derive from the player's trophies.
       const { i: arenaIndex } = arenaFor(save.trophies);
-      const aiDeckIndex = aiDeckIndexFor(arenaIndex);
       const aiLevel = aiLevelFor(save.trophies);
+      // The deck no longer does. Picking it off a server-side stream is what stops a player
+      // meeting the same eight cards for an entire arena; `aiDeckIndex` is frozen into the
+      // Match row below, so the re-simulation at finish still replays the exact deck that was
+      // played against. Rolled on its own stream, not the match seed — the client is told the
+      // deck anyway, but the seed must stay unguessable from anything it receives.
+      const aiDeckIndex = aiDeckIndexFor(arenaIndex, new Rng(randomSeed()));
 
       const cfg: SimConfig = {
         seed: randomSeed(),
@@ -245,6 +254,74 @@ export async function matchRoutes(app: FastifyInstance): Promise<void> {
       );
 
       return { result, crowns, rewards, save: persisted };
+    },
+  );
+
+  /**
+   * The player's recent matches.
+   *
+   * Every one of these rows was written to decide a payout; listing them costs one indexed
+   * scan and gives the game a match history it never had. `replayable` is false for a voided
+   * log — the row is real, the match happened, but there is nothing legal to play back.
+   */
+  app.get(
+    '/api/match/history',
+    { preHandler: requireUser, config: limit(LIMITS.read) },
+    async (req): Promise<MatchHistoryResponse> => {
+      const rows = await store.recentMatches(req.userId!, HISTORY_SIZE);
+      return {
+        matches: rows
+          .filter((m) => m.result && m.crowns)
+          .map((m) => ({
+            matchId: m.id,
+            result: m.result!,
+            crowns: m.crowns!,
+            trophyDelta: m.trophyDelta ?? 0,
+            arenaIndex: m.arenaIndex,
+            opponentName: m.opponent?.name ?? '',
+            opponentAvatar: m.opponent?.avatar ?? '',
+            at: (m.finishedAt ?? m.createdAt).toISOString(),
+            replayable: m.validated && !!m.deployLog,
+          })),
+      };
+    },
+  );
+
+  /**
+   * Everything needed to replay one match.
+   *
+   * Nothing here is generated for the occasion: `config` is the SimConfig frozen at
+   * `/match/start` and `deployLog` is the log the server already re-simulated to decide the
+   * result. The client runs the same deterministic `Sim` over them and gets the same match
+   * back, tick for tick.
+   *
+   * Scoped to the caller. A match is a record of somebody's account — their deck, their card
+   * levels — and there is no reason for it to be readable by anyone else.
+   */
+  app.get(
+    '/api/match/:id/replay',
+    { preHandler: requireUser, config: limit(LIMITS.read) },
+    async (req): Promise<MatchReplayResponse> => {
+      const { id } = req.params as { id: string };
+      const match = await store.getMatch(id);
+      // Same response for "does not exist" and "is not yours": match ids are cuids and there
+      // is nothing to gain from confirming one belongs to somebody.
+      if (!match || match.userId !== req.userId) throw new HttpError(404, API_ERRORS.matchNotFound, 'no such match');
+      if (!match.validated || !match.deployLog || !match.result || !match.crowns) {
+        throw new HttpError(409, API_ERRORS.invalidLog, 'that match has no replayable log');
+      }
+      const { save } = await loadSave(store, await requireUserRow(store, req));
+      return {
+        matchId: match.id,
+        config: match.config,
+        deployLog: match.deployLog,
+        result: match.result,
+        crowns: match.crowns,
+        arenaIndex: match.arenaIndex,
+        opponentName: match.opponent?.name ?? '',
+        opponentAvatar: match.opponent?.avatar ?? '',
+        myName: save.name,
+      };
     },
   );
 }

@@ -294,6 +294,16 @@ export class PrismaStore implements Store {
     await db.match.updateMany({ where: { id }, data });
   }
 
+  async recentMatches(userId: string, limit: number): Promise<MatchRow[]> {
+    const db = await this.client();
+    const rows = await db.match.findMany({
+      where: { userId, finishedAt: { not: null } },
+      orderBy: [{ finishedAt: 'desc' }],
+      take: limit,
+    });
+    return rows.map(toMatch);
+  }
+
   async expireMatches(before: Date, at: Date): Promise<number> {
     const db = await this.client();
     const res = await db.match.updateMany({

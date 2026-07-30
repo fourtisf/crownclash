@@ -16,9 +16,9 @@
  *    integration looked.
  */
 import {
-  AH, AW, CARD, DT, MIN_DEPLOY_GAP_TICKS, Sim, aiUpdate, clamp,
+  AH, ARENAS, AW, CARD, DT, MIN_DEPLOY_GAP_TICKS, Sim, aiUpdate, clamp,
 } from '@crown/shared';
-import type { DeployLogEntry, MatchStartResponse, Unit } from '@crown/shared';
+import type { DeployLogEntry, MatchReplayResponse, MatchStartResponse, Unit } from '@crown/shared';
 import { $, must } from './dom';
 import { Art, Snd, bindRenderer, buildArenaBG, fitCanvas, render, renderPortrait, setArenaTrophies } from './engine';
 import type { RenderFacade } from './engine';
@@ -30,6 +30,7 @@ import { hitStop, hitStopActive, resetHitStop, setQuality } from './gfx';
 import { duckMusic, setMusicIntensity } from './music';
 import { setAmbienceArena } from './ambience';
 import { closeModal, lockModal, openModal } from './ui/modal';
+import { STR } from './screens/strings';
 
 /** The live battle, or null when we are not in one. Mirrors the prototype's `B` global. */
 export let B: BattleView | null = null;
@@ -52,6 +53,14 @@ interface BattleView extends RenderFacade {
   submitted: boolean;
   /** Tick of the last accepted deploy, for the 300 ms floor. -1 before the first. */
   lastDeployTick: number;
+  /**
+   * Set when this is a replay rather than a live match.
+   *
+   * A replay is not a recording — it is the stored deploy log played back through the same
+   * deterministic `Sim` the server used to validate it. The loop feeds `pending` in at the
+   * ticks it names and takes no input; nothing is submitted at the end.
+   */
+  replay: { pending: DeployLogEntry[]; next: number; speed: number; done: boolean } | null;
   /* mirrored each frame from sim.state so the verbatim renderer can read them */
   crowns: [number, number];
   elix: [number, number];
@@ -84,6 +93,11 @@ export interface BattleCallbacks {
   ): void;
   /** Called when the first-match walkthrough is finished or skipped. */
   onTutorialDone?(): void;
+  /**
+   * Called when a replay is closed. Screen *and* tab, which is a pairing only main.ts holds —
+   * `go` alone leaves Home showing whatever body was last rendered into it.
+   */
+  onReplayExit?(): void;
   /** Screen switch, so battle.ts does not need to know about the tab system. */
   go(screen: string): void;
 }
@@ -129,6 +143,7 @@ export function startBattle(start: MatchStartResponse): void {
     dragging: false,
     submitted: false,
     lastDeployTick: -1,
+    replay: null,
     sc: 12,
     time: 0,
     over: false,
@@ -201,12 +216,128 @@ export function startBattle(start: MatchStartResponse): void {
   }
 }
 
+/**
+ * Play back a finished match.
+ *
+ * Nothing is re-recorded or re-derived: `config` is the SimConfig the server froze at
+ * `/match/start` and `log` is the deploy log it already re-simulated to decide the result. The
+ * same deterministic `Sim` over the same inputs reproduces the match tick for tick, which is
+ * why a replay costs no storage at all beyond what validation already required.
+ *
+ * The live path is reused wholesale — same renderer, same FX, same HUD — with three things
+ * off: input is ignored, the give-up button is hidden, and nothing is submitted at the end.
+ */
+export function startReplay(data: MatchReplayResponse): void {
+  Snd.init();
+  if (Snd.ctx && Snd.ctx.state === 'suspended') void Snd.ctx.resume();
+
+  const sim = new Sim(data.config);
+  const fx = new Fx();
+  B = {
+    sim, fx,
+    matchId: data.matchId,
+    deployLog: [],
+    handNodes: [],
+    elixSegs: [],
+    lastE: -1,
+    lastM: -1,
+    dragging: false,
+    submitted: true,
+    lastDeployTick: -1,
+    // Sorted by tick: the loop walks this with a cursor rather than scanning, and the server
+    // has no ordering guarantee it is obliged to honour.
+    replay: { pending: data.deployLog.slice().sort((a, b) => a.t - b.t), next: 0, speed: 1, done: false },
+    sc: 12,
+    time: 0,
+    over: false,
+    selected: -1,
+    ghost: null,
+    shake: 0,
+    hand: sim.state.hand,
+    units: sim.state.units,
+    projs: sim.state.projs,
+    spells: sim.state.spells,
+    parts: fx.parts,
+    floats: fx.floats,
+    rings: fx.rings,
+    crowns: sim.state.crowns,
+    elix: sim.state.elix,
+    mult: 1,
+    t: sim.state.t,
+    phase: 'normal',
+    dt: 0,
+  };
+  must('#bMyName').textContent = data.myName;
+  must('#bEnemyName').textContent = data.opponentName;
+
+  setQuality(S.quality);
+  resetHitStop();
+  // The arena the match was *played* in, not the one the player is in now — they may well
+  // have climbed since.
+  const trophies = ARENAS[clamp(data.arenaIndex, 0, ARENAS.length - 1)].t;
+  setArenaTrophies(trophies);
+  setAmbienceArena(trophies);
+  buildArenaBG();
+  setToast('');
+  cb?.go('battle');
+
+  renderHand();
+  updateCrowns();
+  buildElix();
+  updateElixUI();
+  sizeArena();
+  requestAnimationFrame(() => {
+    sizeArena();
+    requestAnimationFrame(() => sizeArena());
+  });
+
+  // Give-up has no meaning here; the replay bar takes its place.
+  const gu = $('#giveUp');
+  if (gu) gu.hidden = true;
+  showReplayBar(true);
+
+  lastT = performance.now();
+  acc = 0;
+  lastSec = -1;
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+/** The replay transport: speed toggle and a way out. Built once, then shown and hidden. */
+function showReplayBar(on: boolean): void {
+  let bar = $('#replayBar');
+  if (!bar && on) {
+    bar = document.createElement('div');
+    bar.id = 'replayBar';
+    bar.innerHTML =
+      '<button class="rbtn" id="rbExit">✕ EXIT</button>' +
+      '<span class="rtag">REPLAY</span>' +
+      '<button class="rbtn" id="rbSpeed">1×</button>';
+    must('#arenaWrap').appendChild(bar);
+    must('#rbExit').onclick = () => {
+      stopBattle();
+      cb?.onReplayExit?.();
+    };
+    must('#rbSpeed').onclick = () => {
+      if (!B?.replay) return;
+      // 1x → 2x → 4x. Speed multiplies the accumulator, so the sim still steps at exactly
+      // 30 Hz and the replay stays identical to the match — only wall-clock time changes.
+      B.replay.speed = B.replay.speed >= 4 ? 1 : B.replay.speed * 2;
+      must('#rbSpeed').textContent = B.replay.speed + '×';
+    };
+  }
+  if (bar) bar.hidden = !on;
+  const sp = $('#rbSpeed');
+  if (sp && on) sp.textContent = '1×';
+}
+
 export function stopBattle(): void {
   cancelAnimationFrame(rafId);
   rafId = 0;
   stopTutorial();
   const gu = $('#giveUp');
   if (gu) gu.hidden = true;
+  showReplayBar(false);
   B = null;
 }
 
@@ -378,6 +509,9 @@ function bindBattleInput(): void {
       Snd.play(180, 0.1, 'square', 0.05);
       return;
     }
+    // A replay takes no input; tapping the hand must not light a card the viewer
+    // cannot then deploy.
+    if (B.replay) return;
     B.selected = B.selected === i ? -1 : i;
     B.dragging = true;
     B.handNodes.forEach((n) => n.classList.toggle('picked', Number(n.dataset.i) === B!.selected));
@@ -519,9 +653,23 @@ function loop(ts: number): void {
   const st = B.sim.state;
 
   if (!st.over) {
-    acc += frame;
+    // Speed scales wall-clock only. The sim still advances in exact `DT` steps, so a 4x replay
+    // is the same match as a 1x one — which it has to be, or it is not a replay.
+    acc += frame * (B.replay ? B.replay.speed : 1);
     let steps = 0;
-    while (acc >= DT && steps < 10) {
+    const maxSteps = B.replay ? 10 * B.replay.speed : 10;
+    while (acc >= DT && steps < maxSteps) {
+      // Feed the recorded deploys in at the ticks they were made on, before the tick runs —
+      // the same order `runMatch` applies them in on the server.
+      const rp = B.replay;
+      if (rp) {
+        while (rp.next < rp.pending.length && rp.pending[rp.next].t <= st.tick) {
+          const e = rp.pending[rp.next++];
+          // Same entry point `runMatch` uses server-side, so the replay consumes elixir and
+          // cycles the hand exactly as the live match did.
+          B.sim.playCardId(e.cardId, e.x, e.y);
+        }
+      }
       // Snapshot pre-tick positions for interpolation. Kept on the client because the server
       // has no renderer and should not carry two extra floats per unit through a re-sim.
       for (const u of st.units as (Unit & { px?: number; py?: number })[]) {
@@ -577,6 +725,11 @@ function loop(ts: number): void {
   if (!hitStopActive(ts)) drawInterpolated(st.over ? 0 : clamp(acc / DT, 0, 1));
   updateHud();
   updateCrowns();
+
+  if (st.over && B.replay && !B.replay.done) {
+    B.replay.done = true;
+    setToast(st.endResult === 'win' ? STR.replay.endWin : st.endResult === 'lose' ? STR.replay.endLose : STR.replay.endDraw);
+  }
 
   if (st.over && !B.submitted) {
     B.submitted = true;

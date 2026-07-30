@@ -19,6 +19,7 @@ import { toastTop } from './ui/toast';
 import { markDots, setTab } from './ui/tabs';
 import { drawMiniArena, initLanding, refreshHeader, renderChests } from './screens/home';
 import { invalidateLeaderboard } from './screens/leaderboard';
+import { invalidateHistory } from './screens/history';
 import { bindRecoveryEntry, maybePromptRecovery, setHasRecovery } from './screens/recovery';
 import { findMatch } from './screens/matchmaking';
 import { showResult } from './screens/result';
@@ -64,6 +65,8 @@ async function finishMatch(
     // Trophies just moved, so the cached board is stale — the rank on the Home screen the
     // player is about to land on has to reflect the match they just played.
     invalidateLeaderboard();
+    // ...and the match that just happened belongs at the top of the battle log.
+    invalidateHistory();
     markDots();
     showResult(res, {
       onHome: () => {
@@ -133,6 +136,11 @@ async function init(): Promise<void> {
   bindModals();
   initBattle({
     onFinish: (id, log, opts) => void finishMatch(id, log, opts),
+    // Leaving a replay puts the player back where they started it.
+    onReplayExit: () => {
+      go('home');
+      setTab('home');
+    },
     // Fire-and-forget: seeing the walkthrough is not worth blocking on, and if the write is
     // lost the worst case is one extra viewing.
     onTutorialDone: () => {

@@ -15,7 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
-  AH, AI_DECKS, AI_NAMES, ARENAS, AW, BRIDGE, CARD, CARDS, CHESTS, LOGIN_REWARDS, QUEST_POOL,
+  AH, AI_DECKS, AI_DECKS_PER_TIER, AI_NAMES, AI_TIERS, ARENAS, AW, BRIDGE, CARD, CARDS, CHESTS,
+  LOGIN_REWARDS, QUEST_POOL,
   RARITY, RIV_B, RIV_T, SHOP, SPD, TOWER_DEF, TOWER_POS, BEHEMOTH_MINI, arenaFor,
 } from '../src/data.js';
 import { defaultState, STARTER_CARDS } from '../src/state.js';
@@ -142,14 +143,36 @@ describe('data.ts is verbatim from crown-clash.html', () => {
     expect(clean(TOWER_POS)).toEqual(clean(evalConst('TOWER_POS')));
   });
 
-  it('AI_DECKS and AI_NAMES', () => {
-    expect(clean(AI_DECKS)).toEqual(clean(evalConst('AI_DECKS')));
+  /**
+   * AI_DECKS is the one constant in this file allowed to *grow* past the prototype (D11 in
+   * docs/EXTRACTION-PLAN.md).
+   *
+   * The prototype's six decks are still here, unchanged, and this test proves it. But six
+   * decks picked by a pure function of arena index meant a player met the same eight cards
+   * every match for an entire arena, so six more were added and the choice is now randomised
+   * within a tier band. Nothing about any *card* changed — these are new hands dealt from the
+   * same 21 — so the balance the parity suite exists to protect is untouched.
+   */
+  it('AI_DECKS keeps every prototype deck, and everything added is playable', () => {
+    const original = clean(evalConst('AI_DECKS')) as string[][];
+    const mine = clean(AI_DECKS) as string[][];
+    const key = (d: string[]): string => d.join('|');
+    const present = new Set(mine.map(key));
+    for (const deck of original) {
+      expect(present.has(key(deck)), `prototype deck dropped: ${key(deck)}`).toBe(true);
+    }
+    expect(mine.length).toBeGreaterThanOrEqual(original.length);
     expect(clean(AI_NAMES)).toEqual(clean(evalConst('AI_NAMES')));
-    // Every AI deck must be playable.
+
+    // Every deck, old or new, must be playable: 8 distinct real cards.
     for (const deck of AI_DECKS) {
       expect(deck).toHaveLength(8);
+      expect(new Set(deck).size, `duplicate card in ${key(deck)}`).toBe(8);
       for (const id of deck) expect(CARD[id], `AI deck references unknown card ${id}`).toBeTruthy();
     }
+    // Tiers have to divide evenly or `aiDeckIndexFor`'s banding silently skips decks.
+    expect(AI_DECKS.length % AI_DECKS_PER_TIER).toBe(0);
+    expect(AI_TIERS).toBe(AI_DECKS.length / AI_DECKS_PER_TIER);
   });
 
   it('arena geometry scalars', () => {

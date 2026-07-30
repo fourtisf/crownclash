@@ -85,8 +85,32 @@ export const STR = {
       'Pick a card from your collection for slot ' + (slot + 1),
     addedToDeck: (name: string): string => name + ' added to deck!',
     upgraded: (name: string, lv: number): string => name + ' upgraded to level ' + lv + '!',
+    deckAdvice: 'DECK CHECK',
+    deckOk: 'This deck covers the basics.',
+    noAir: 'Nothing in this deck can hit air. Flying troops will walk straight to your tower.',
+    noWin: 'No win condition — nothing here is built to reach a tower.',
+    noSpell: 'No spell. Swarms are much harder to clear without one.',
+    noCheap: 'Everything costs 3+. You will often be stuck with nothing you can afford.',
+    heavy: (avg: string): string =>
+      'Average cost ' + avg + ' ⚡ is very heavy — you will be out of elixir most of the match.',
     strongAgainst: 'STRONG AGAINST',
     weakAgainst: 'WEAK AGAINST',
+  },
+
+  /* ----------------------------------------------------------------- replay */
+  replay: {
+    title: 'BATTLE LOG',
+    empty: 'No battles yet — play one!',
+    unavailable: 'Battle log unavailable right now',
+    watch: '▶',
+    endWin: 'REPLAY ENDED · VICTORY',
+    endLose: 'REPLAY ENDED · DEFEAT',
+    endDraw: 'REPLAY ENDED · DRAW',
+    voided: 'Not replayable',
+    loading: 'Loading replay…',
+    failed: 'That replay could not be loaded',
+    result: (r: 'win' | 'lose' | 'draw'): string => (r === 'win' ? 'WIN' : r === 'lose' ? 'LOSS' : 'DRAW'),
+    delta: (n: number): string => (n > 0 ? '+' + n : String(n)) + ' 🏆',
   },
 
   /* --------------------------------------------------------------- recovery */

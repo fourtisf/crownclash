@@ -8,8 +8,10 @@
  * Everything visual — frame colours, the progress sliver, the stat rows, the sort order —
  * is the prototype's.
  */
-import { CARD, CARDS, MAX_CARD_LEVEL, RARITY, clamp, fmt, matchups, ownsCard, statMul , TELEMETRY } from '@crown/shared';
-import type { Card, RarityKey } from '@crown/shared';
+import {
+  CARD, CARDS, MAX_CARD_LEVEL, RARITY, TELEMETRY, clamp, deckWarnings, fmt, matchups, ownsCard, statMul,
+} from '@crown/shared';
+import type { Card, DeckWarning, RarityKey } from '@crown/shared';
 import { $, must } from '../dom';
 import { Snd, renderPortrait } from '../engine';
 import { S, setSave } from '../api/store';
@@ -74,7 +76,8 @@ export function cardNode(cid: string, opt: CardNodeOpts = {}): HTMLElement {
 export function renderCardsTab(body: HTMLElement): void {
   body.innerHTML =
     '<div class="sect" style="margin-top:4px"><div class="secthead"><h3>' + STR.cards.battleDeck +
-      '</h3><span class="pill" id="deckAvg2">Avg 0 ⚡</span></div><div class="deckrow" id="tabDeck"></div></div>' +
+      '</h3><span class="pill" id="deckAvg2">Avg 0 ⚡</span></div><div class="deckrow" id="tabDeck"></div>' +
+      '<div id="deckCheck"></div></div>' +
     '<div class="sect"><div class="secthead"><h3>' + STR.cards.collection +
       '</h3><span class="pill" id="colCount"></span></div><div class="cardgrid" id="colGrid"></div></div>' +
     '<div style="height:8px"></div>';
@@ -85,6 +88,7 @@ export function renderCardsTab(body: HTMLElement): void {
     dr.appendChild(cardNode(cid, { slot: i }));
   });
   must('#deckAvg2').textContent = STR.home.deckAvg((tot / 8).toFixed(1));
+  renderDeckCheck(must('#deckCheck'), (tot / 8).toFixed(1));
   const grid = must('#colGrid');
   // L2617-2622 — owned first, then rarity order, then elixir cost. `sort` is stable in every
   // engine we target, so equal-cost cards keep their `CARDS` declaration order.
@@ -124,6 +128,30 @@ function statRows(card: Card, mul: number): string {
     ) +
     (num(card.cnt) > 1 ? row(STR.cards.statCount, STR.cards.units(num(card.cnt))) : '')
   );
+}
+
+/**
+ * Deck check — added by the port.
+ *
+ * Eight slots out of 21 cards, and the prototype gave no guidance at all: a new player could
+ * lose for a week to a flier without ever being told their deck could not hit one. The holes
+ * come from `deckWarnings()` in @crown/shared, which reads them off the same card data the sim
+ * enforces — so this is not advice about the metagame, it is a list of things that will lose
+ * matches mechanically.
+ *
+ * Silent when the deck is fine. A permanent green tick trains people to stop reading it.
+ */
+function renderDeckCheck(host: HTMLElement, avg: string): void {
+  const warns = deckWarnings(S.deck);
+  if (!warns.length) {
+    host.innerHTML = '';
+    return;
+  }
+  const text = (w: DeckWarning): string => (w === 'heavy' ? STR.cards.heavy(avg) : STR.cards[w]);
+  host.innerHTML =
+    '<div class="dcheck"><div class="dclabel">' + STR.cards.deckAdvice + '</div>' +
+    warns.map((w) => '<div class="dcrow">⚠️ <span>' + text(w) + '</span></div>').join('') +
+    '</div>';
 }
 
 /**

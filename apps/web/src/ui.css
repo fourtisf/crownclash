@@ -417,3 +417,117 @@
   color: #ff9a8a;
 }
 .rcerr[hidden] { display: none }
+
+/* ---------------------------------------------------------------- battle log */
+
+.hrow {
+  display: grid;
+  grid-template-columns: 42px 1fr auto 22px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  border-radius: 10px;
+  border: 2px solid rgba(0, 0, 0, .35);
+  border-left-width: 5px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(0, 0, 0, .16));
+  text-align: left;
+}
+.hrow:active { transform: translateY(2px) }
+/* The result is the first thing scanned, so it is the border colour as well as the label. */
+.hrow.win  { border-left-color: #4fd07a }
+.hrow.lose { border-left-color: #e0604a }
+.hrow.draw { border-left-color: #8f9ecb }
+/* Voided: listed because the match happened, but there is no legal log to play back. */
+.hrow.dead { opacity: .5; cursor: default }
+.hrow.dead:active { transform: none }
+
+.hres { font-family: 'Lilita One', cursive; font-size: 12px; letter-spacing: .6px }
+.hrow.win  .hres { color: #7fe0a0 }
+.hrow.lose .hres { color: #ff9a8a }
+.hrow.draw .hres { color: #b9c4e6 }
+
+.hmid { min-width: 0 }
+.hopp {
+  font-size: 12px; font-weight: 800; color: #e8eeff;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hsub { font-size: 10px; font-weight: 700; color: #8f9ecb; margin-top: 1px }
+.hdelta { font-size: 11px; font-weight: 800; color: var(--gold); white-space: nowrap }
+.hplay { font-size: 13px; color: var(--gold); text-align: center }
+
+/* ---------------------------------------------------------------- replay bar */
+
+/*
+ * Sits where the give-up button does — top-left of the arena, the one corner a player never
+ * taps — and spans across for the speed control. Only ever visible during a replay, where
+ * there is no deploying to get in the way of.
+ */
+#replayBar {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 6px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+#replayBar[hidden] { display: none }
+
+#replayBar .rbtn {
+  pointer-events: auto;
+  font-family: 'Lilita One', cursive;
+  font-size: 11px;
+  letter-spacing: .8px;
+  padding: 6px 10px 7px;
+  cursor: pointer;
+  color: #e8eeff;
+  border: 2.5px solid var(--ink);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(42, 61, 125, .92), rgba(20, 32, 79, .92));
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, .18), 0 3px 0 var(--ink);
+}
+#replayBar .rbtn:active { transform: translateY(3px); box-shadow: inset 0 2px 0 rgba(255,255,255,.15), 0 0 0 var(--ink) }
+#replayBar .rbtn:last-child { margin-left: auto }
+
+#replayBar .rtag {
+  font-family: 'Lilita One', cursive;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #ffd9a8;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .7);
+}
+
+/* ---------------------------------------------------------------- deck check */
+
+/*
+ * Only rendered when something is actually wrong, so it can afford to be loud. A panel that is
+ * always present becomes furniture and stops being read.
+ */
+.dcheck {
+  margin-top: 9px;
+  padding: 9px 11px 10px;
+  border: 2px solid rgba(0, 0, 0, .4);
+  border-radius: 11px;
+  background: rgba(255, 176, 74, .12);
+  text-align: left;
+}
+.dclabel {
+  font-family: 'Lilita One', cursive;
+  font-size: 9.5px;
+  letter-spacing: 1.6px;
+  color: #ffd9a8;
+  margin-bottom: 5px;
+}
+.dcrow {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: #ffe6c4;
+}
+.dcrow + .dcrow { margin-top: 4px }

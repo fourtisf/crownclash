@@ -211,6 +211,11 @@ export interface Store {
    */
   claimMatch(id: string, at: Date): Promise<boolean>;
   completeMatch(id: string, patch: MatchCompleteInput): Promise<void>;
+  /**
+   * The player's most recently finished matches, newest first. Served by
+   * `@@index([userId, createdAt(sort: Desc)])`, which the schema has always carried.
+   */
+  recentMatches(userId: string, limit: number): Promise<MatchRow[]>;
   /** Marks matches started before `before` and never finished as voided. Returns the count. */
   expireMatches(before: Date, at: Date): Promise<number>;
 

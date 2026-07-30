@@ -103,6 +103,10 @@ class SlowStore implements Store {
     await this.gap();
     return this.inner.adoptDevice(userId, deviceId);
   }
+  async recentMatches(userId: string, limit: number): Promise<MatchRow[]> {
+    await this.gap();
+    return this.inner.recentMatches(userId, limit);
+  }
   async createUser(input: { deviceId: string; save: SaveState }): Promise<UserRow> {
     await this.gap();
     return this.inner.createUser(input);

@@ -8,7 +8,7 @@
  * the server owns the save. The client never patches its local copy from its own optimism;
  * it replaces it with whatever comes back.
  */
-import type { ChestKey, DeployLogEntry, MatchOutcome, Quality, SaveState } from './types.js';
+import type { ChestKey, DeployLogEntry, MatchOutcome, Quality, SaveState, SimConfig } from './types.js';
 import type { ChestResult, MatchRewards } from './economy.js';
 
 export const API_PREFIX = '/api';
@@ -169,6 +169,48 @@ export interface MatchFinishResponse {
   save: SaveState;
   /** Present when the log failed validation; the match is recorded but pays nothing. */
   voided?: { reason: string };
+}
+
+/* -------------------------------------------------------------------- replay */
+
+/**
+ * Match history and replays.
+ *
+ * Every finished match already stores everything a replay needs — the seed, the `SimConfig`
+ * frozen at start, the AI deck and level, and the full deploy log — because the server
+ * re-simulates it to decide the result. The sim is deterministic, so handing those same things
+ * back to the client reproduces the match exactly, tick for tick. There is no video and no
+ * recording: the replay *is* the validation input, played forward instead of checked.
+ */
+export interface MatchSummary {
+  matchId: string;
+  result: MatchOutcome;
+  crowns: [number, number];
+  trophyDelta: number;
+  arenaIndex: number;
+  opponentName: string;
+  opponentAvatar: string;
+  /** ISO timestamp the match finished. */
+  at: string;
+  /** False when the log failed validation — the match is listed, but there is nothing to play. */
+  replayable: boolean;
+}
+
+export interface MatchHistoryResponse {
+  matches: MatchSummary[];
+}
+
+export interface MatchReplayResponse {
+  matchId: string;
+  config: SimConfig;
+  deployLog: DeployLogEntry[];
+  result: MatchOutcome;
+  crowns: [number, number];
+  arenaIndex: number;
+  opponentName: string;
+  opponentAvatar: string;
+  /** The player's name, so the replay header reads the way the match did. */
+  myName: string;
 }
 
 /* --------------------------------------------------------------------- chest */

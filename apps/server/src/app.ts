@@ -27,6 +27,7 @@ import { SaveConflictError, type Store } from './lib/store.js';
 import { authRoutes } from './routes/auth.js';
 import { economyRoutes } from './routes/economy.js';
 import { leaderboardRoutes } from './routes/leaderboard.js';
+import { telemetryRoutes } from './routes/telemetry.js';
 import { matchRoutes } from './routes/match.js';
 import { saveRoutes } from './routes/save.js';
 import { registerWs } from './ws.js';
@@ -148,6 +149,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(matchRoutes);
   await app.register(economyRoutes);
   await app.register(leaderboardRoutes);
+  await app.register(telemetryRoutes);
 
   if (opts.websocket ?? true) await registerWs(app);
 

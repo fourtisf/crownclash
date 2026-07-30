@@ -138,13 +138,21 @@ the slices, the generated preludes supply them:
   `setSfxEnabled()`, so the slices keep reading `S.x` as they always did.
 - **`B` / `aCtx`** — assigned by `bindRenderer()`; `B` is the facade described in §2.
 
-### Copy kept verbatim (mixed Indonesian/English)
+### Copy: the prototype's mixed Indonesian/English is now English throughout
 
-`hms()` renders hours as `3j 0m`; `'BARU!'`, `'Arena tertinggi!'`, `'Sudah diambil — balik besok!'`,
-`'…tersambung'`, `'…didapat!'`, `'SUARA: ON/OFF'`, `'3 menit'`, `'Progress tersimpan otomatis'`,
-and `<html lang="id">`. Handoff §7 says "no renamed anything" — all strings ship unchanged and
-are centralised in `apps/web/src/i18n/strings.ts` so a future pass can localise without a
-gameplay diff.
+The prototype shipped a handful of Indonesian strings in an otherwise English UI: `hms()`
+rendered hours as `3j 0m` (*jam*) and seconds as `45d` (*detik*), plus `'BARU!'`,
+`'Arena tertinggi!'`, `'Sudah diambil — balik besok!'`, `'…tersambung'`, `'…didapat!'`,
+`'SUARA: ON/OFF'`, `'3 menit'`, `'Progress tersimpan otomatis'`, and `<html lang="id">`.
+
+All of them are now English, on the product owner's instruction. This is the one place the
+port deliberately departs from "the prototype is the spec", and it is safe to do so because
+every string lives in `apps/web/src/screens/strings.ts` and none of them is load-bearing —
+nothing parses or compares them. `hms()` keeps the *shape* of its output (`3h 0m` / `45s`), so
+the layout that measures it does not move.
+
+Note that `dayKey()` is **not** affected and must never be: quest resets and the login streak
+compare its string against one already stored in every live save.
 
 ---
 
@@ -161,7 +169,13 @@ packages/shared          pure TS, zero DOM, zero Node built-ins — runs in brow
   ai.ts                  aiUpdate(sim) — seeded, deterministic
   economy.ts             rollChest, grantChest, quests, login, trophy/XP/reward math
   validate.ts            deploy-log legality + save sanity caps
-apps/web                 Vite + vanilla TS; art/styles/render sliced verbatim
+  counters.ts            ADDED — derives card matchups from data.ts using sim.ts's own rules
+apps/web                 Vite + vanilla TS; styles/sound sliced verbatim
+  gfx.ts                 ADDED — quality presets, glow sprite cache, bloom, hit-stop
+  ambience.ts            ADDED — water, cloud shadows, weather motes, colour grade
+  music.ts               ADDED — procedural two-track soundtrack over the Snd AudioContext
+  telemetry.ts           ADDED — batched event/error reporting
+  art.ts render.ts arenaBg.ts   FORKED from the prototype, now hand-maintained (see §1)
 apps/server              Fastify + ws; owns saves, re-sims matches, issues chests
 ```
 

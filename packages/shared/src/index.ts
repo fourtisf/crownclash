@@ -9,6 +9,7 @@ export * from './types.js';
 export * from './rng.js';
 export * from './util.js';
 export * from './data.js';
+export * from './counters.js';
 export * from './state.js';
 export * from './sim.js';
 export * from './ai.js';

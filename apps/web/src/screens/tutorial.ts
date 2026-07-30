@@ -17,7 +17,9 @@
  *    timeout, and SKIP is always available. A tutorial that can trap a player is worse than
  *    no tutorial.
  */
+import { TELEMETRY } from '@crown/shared';
 import { $ } from '../dom';
+import { track } from '../telemetry';
 
 export interface CoachStep {
   /** Selector for the element to ring, if any. */
@@ -125,6 +127,9 @@ export function startTutorial(ctx: Ctx, finished: () => void): void {
     textEl.innerHTML = s.text;
     setTarget(s.target);
     box.classList.add('on');
+    // Emitted per step so the drop-off point is visible. "Players quit during onboarding" is
+    // useless; "60% never get past step 3, the one that asks them to tap the arena" is a fix.
+    track(TELEMETRY.tutorialStep, { step: i + 1, of: STEPS.length });
   };
 
   const advance = (): void => {

@@ -56,10 +56,16 @@ export const statMul = (lv: number): number => Math.pow(1.1, lv - 1);
  */
 export const towerMul = (lv: number): number => Math.pow(1.085, lv - 1);
 
-/** L2583 — countdown formatting. `3j 0m` is the prototype's Indonesian hour suffix. */
+/**
+ * L2583 — countdown formatting.
+ *
+ * The prototype emitted `3j 0m` and `45d`: `j` is Indonesian for *jam* (hour) and `d` for
+ * *detik* (second), which read as nonsense in an otherwise English UI. Now `3h 0m` / `45s`.
+ * The shape of the output is unchanged, so nothing that measures it needs to move.
+ */
 export const hms = (ms: number): string => {
   const s = Math.ceil(ms / 1000);
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
-  return h > 0 ? h + 'j ' + m + 'm' : m > 0 ? m + 'm' : s + 'd';
+  return h > 0 ? h + 'h ' + m + 'm' : m > 0 ? m + 'm' : s + 's';
 };

@@ -73,6 +73,7 @@ export interface ProfileUpdateRequest {
   name?: string;
   avatar?: string;
   sfx?: boolean;
+  music?: boolean;
   deck?: string[];
   /** First-run explainer dismissed. The prototype persisted this on `S` (L2995). */
   seen?: boolean;
@@ -198,6 +199,48 @@ export interface LeaderboardResponse {
   entries: LeaderboardEntry[];
   me: LeaderboardEntry | null;
 }
+
+/* ----------------------------------------------------------------- telemetry */
+
+/**
+ * One analytics event.
+ *
+ * Deliberately loose: `name` plus a flat bag of scalars. A rigid schema would mean a server
+ * deploy every time a question changes, and the questions change constantly early on.
+ * The server clamps sizes and never trusts any of it — telemetry is evidence, not state, and
+ * nothing in the game may read it back.
+ */
+export interface TelemetryEvent {
+  name: string;
+  /** Client wall-clock at emit, ms. Kept so out-of-order batches can still be sequenced. */
+  t: number;
+  props?: Record<string, string | number | boolean | null>;
+}
+
+export interface TelemetryRequest {
+  events: TelemetryEvent[];
+  /** Groups events from one page load without needing a cookie or a user id. */
+  session: string;
+}
+
+/** Event names the client emits. Listed here so the two sides cannot drift on spelling. */
+export const TELEMETRY = {
+  appOpen: 'app_open',
+  screenView: 'screen_view',
+  matchStart: 'match_start',
+  matchEnd: 'match_end',
+  matchGiveUp: 'match_give_up',
+  matchVoided: 'match_voided',
+  tutorialStep: 'tutorial_step',
+  tutorialDone: 'tutorial_done',
+  chestOpen: 'chest_open',
+  shopBuy: 'shop_buy',
+  cardUpgrade: 'card_upgrade',
+  questClaim: 'quest_claim',
+  loginClaim: 'login_claim',
+  walletLink: 'wallet_link',
+  clientError: 'client_error',
+} as const;
 
 /* --------------------------------------------------------------------- error */
 

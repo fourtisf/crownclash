@@ -13,18 +13,25 @@ import { initBattle, sizeArena, startBattle, stopBattle } from './battle';
 import { $, $$, must } from './dom';
 import { Snd, setSfxEnabled } from './engine';
 import { setQuality } from './gfx';
+import { initMusic, playMusic, setMusicEnabled } from './music';
 import { bindModals, closeModal, openModal } from './ui/modal';
 import { toastTop } from './ui/toast';
 import { markDots, setTab } from './ui/tabs';
 import { drawMiniArena, initLanding, refreshHeader, renderChests } from './screens/home';
+import { invalidateLeaderboard } from './screens/leaderboard';
 import { findMatch } from './screens/matchmaking';
 import { showResult } from './screens/result';
+import { TELEMETRY } from '@crown/shared';
 import type { DeployLogEntry } from '@crown/shared';
+import { initTelemetry, track } from './telemetry';
 
 /** L2367-2370 — screen switcher. Leaving the battle screen tears the loop down. */
 function go(id: string): void {
   $$('.screen').forEach((s) => s.classList.toggle('on', s.id === id));
   if (id !== 'battle') stopBattle();
+  // The two tracks map exactly onto the two things this switcher chooses between, so the
+  // music never needs to be started or stopped from anywhere else.
+  playMusic(id === 'battle' ? 'battle' : 'menu');
 }
 
 /**
@@ -42,7 +49,20 @@ async function finishMatch(
 ): Promise<void> {
   try {
     const res = await api.matchFinish({ matchId, deployLog, ...opts });
+    // The three numbers that matter for balance: who won, how one-sided, how much was played.
+    track(opts.conceded ? TELEMETRY.matchGiveUp : TELEMETRY.matchEnd, {
+      result: res.result,
+      crowns: res.crowns[0],
+      enemyCrowns: res.crowns[1],
+      deploys: deployLog.length,
+      trophies: res.save.trophies,
+      voided: res.voided ? res.voided.reason : null,
+    });
+    if (res.voided) track(TELEMETRY.matchVoided, { reason: res.voided.reason });
     setSave(res.save);
+    // Trophies just moved, so the cached board is stale — the rank on the Home screen the
+    // player is about to land on has to reflect the match they just played.
+    invalidateLeaderboard();
     markDots();
     showResult(res, { onHome: () => { go('home'); setTab('home'); }, onAgain: () => void findMatch(startBattle) });
   } catch (err) {
@@ -85,10 +105,10 @@ function welcome(): void {
   openModal(
       '<h2 class="goldtext">CROWN CLASH</h2><p class="sub">Real-time arena battler</p>' +
         '<div style="font-size:12.5px;color:#c3cdec;font-weight:700;line-height:1.75;padding:0 4px">' +
-        '<div>⚡ <b>Elixir</b> isi ulang otomatis — maks 10.</div>' +
+        '<div>⚡ <b>Elixir</b> refills on its own — 10 max.</div>' +
         '<div>🃏 Tap a card, then tap the arena to deploy.</div>' +
         '<div>🏰 Destroy enemy towers. King Tower down = instant win.</div>' +
-        '<div>⏱️ 3 menit. Menit terakhir elixir jadi <b>2×</b>.</div>' +
+        '<div>⏱️ 3 minutes. Elixir goes <b>2×</b> in the last one.</div>' +
         '<div>🎁 Win chests → collect cards → level them up.</div>' +
         '</div>' +
       '<button class="btn gold big" id="wGo" style="width:100%;margin-top:14px">GO!</button>',
@@ -98,12 +118,16 @@ function welcome(): void {
 }
 
 async function init(): Promise<void> {
+  initTelemetry();
   bindModals();
   initBattle({
     onFinish: (id, log, opts) => void finishMatch(id, log, opts),
     // Fire-and-forget: seeing the walkthrough is not worth blocking on, and if the write is
     // lost the worst case is one extra viewing.
-    onTutorialDone: () => void api.updateProfile({ tutorialDone: true }).catch(() => undefined),
+    onTutorialDone: () => {
+      track(TELEMETRY.tutorialDone);
+      void api.updateProfile({ tutorialDone: true }).catch(() => undefined);
+    },
     go,
   });
 
@@ -122,15 +146,21 @@ async function init(): Promise<void> {
 
   setSfxEnabled(S.sfx);
   setQuality(S.quality);
+  setMusicEnabled(S.music);
+  initMusic();
   onSaveChange((s) => {
     setSfxEnabled(s.sfx);
     setQuality(s.quality);
+    setMusicEnabled(s.music);
   });
 
   initLanding(() => {
     Snd.init();
     if (Snd.ctx && Snd.ctx.state === 'suspended') void Snd.ctx.resume();
     Snd.crown();
+    // First gesture of the session, and the first moment an AudioContext is legally allowed to
+    // make a sound. Everything before this point was silent whatever the save said.
+    playMusic('menu');
   });
 
   refreshHeader();

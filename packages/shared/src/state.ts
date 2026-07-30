@@ -18,7 +18,7 @@ export function defaultState(): SaveState {
     lvl: 1, xp: 0, trophies: 0, best: 0, gold: 1200, gem: 120,
     wins: 0, losses: 0, cards: {}, deck: STARTER_DECK.slice(),
     quests: { date: '', list: [] }, login: { day: 0, last: '', streak: 0 },
-    freeChestAt: 0, pendingChests: [], stats: { depl: 0, dmg: 0, crown: 0, elix: 0, chests: 0 }, sfx: true, seen: false,
+    freeChestAt: 0, pendingChests: [], stats: { depl: 0, dmg: 0, crown: 0, elix: 0, chests: 0 }, sfx: true, music: true, seen: false,
     tutorialDone: false, quality: 'high',
   };
   for (const id of STARTER_CARDS) st.cards[id] = { lv: 1, cnt: 0 };

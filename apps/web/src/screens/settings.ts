@@ -10,6 +10,7 @@
 import { $$, must } from '../dom';
 import { Snd, setSfxEnabled } from '../engine';
 import { setQuality } from '../gfx';
+import { setMusicEnabled } from '../music';
 import { S, setSave } from '../api/store';
 import { api } from '../api/client';
 import { closeModal, openModal } from '../ui/modal';
@@ -40,6 +41,8 @@ export function openSettings(): void {
       '</div>' +
       '<button class="btn ' + (S.sfx ? 'green' : 'ghost') + '" id="stSfx" style="width:100%;margin-bottom:8px">' +
       (S.sfx ? STR.settings.sfxOn : STR.settings.sfxOff) + '</button>' +
+      '<button class="btn ' + (S.music ? 'green' : 'ghost') + '" id="stMusic" style="width:100%;margin-bottom:8px">' +
+      (S.music ? STR.settings.musicOn : STR.settings.musicOff) + '</button>' +
       // Graphics preset. Applied the moment it is tapped rather than on SAVE, because the
       // only way to judge it is to look at it — and the arena is one tap away.
       '<div class="qlabel">' + STR.settings.quality + '</div>' +
@@ -119,6 +122,31 @@ export function openSettings(): void {
     } catch (err) {
       sfx.disabled = false;
       toastTop(apiMessage(err, STR.settings.saveFailed));
+    }
+  };
+
+  /*
+   * Music toggles in place rather than reopening the modal the way the SFX button does. It has
+   * to be judged by ear, and closing and reopening the sheet under the player's thumb while
+   * they are listening for the difference is the wrong feedback entirely.
+   */
+  const music = must<HTMLButtonElement>('#stMusic');
+  music.onclick = async () => {
+    music.disabled = true;
+    const want = !S.music;
+    // Applied before the round trip: the whole point is that it stops or starts on the tap.
+    setMusicEnabled(want);
+    try {
+      const res = await api.updateProfile({ music: want });
+      setSave(res.save);
+      setMusicEnabled(res.save.music);
+      music.className = 'btn ' + (res.save.music ? 'green' : 'ghost');
+      music.textContent = res.save.music ? STR.settings.musicOn : STR.settings.musicOff;
+    } catch (err) {
+      setMusicEnabled(S.music);
+      toastTop(apiMessage(err, STR.settings.saveFailed));
+    } finally {
+      music.disabled = false;
     }
   };
 

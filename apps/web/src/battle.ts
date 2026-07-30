@@ -27,6 +27,7 @@ import { S } from './api/store';
 import { setToast } from './ui/toast';
 import { startTutorial, stopTutorial } from './screens/tutorial';
 import { hitStop, hitStopActive, resetHitStop, setQuality } from './gfx';
+import { duckMusic, setMusicIntensity } from './music';
 import { setAmbienceArena } from './ambience';
 import { closeModal, lockModal, openModal } from './ui/modal';
 
@@ -472,6 +473,8 @@ function updateElixUI(): void {
   if (mult !== B.lastM) {
     B.lastM = mult;
     must('#elixX2').textContent = mult > 1 ? 'x' + mult + ' ELIXIR' : '';
+    // Same signal drives the music: the track opens up when the elixir does.
+    setMusicIntensity(mult);
   }
 }
 
@@ -530,8 +533,11 @@ function loop(ts: number): void {
       for (const e of events) {
         // Freeze the picture for a beat on the two moments that should land like a punch.
         // Rendering only — the accumulator keeps ticking, so the deploy log is untouched.
-        if (e.k === 'towerDown') hitStop(110);
-        else if (e.k === 'deathBlast') hitStop(70);
+        if (e.k === 'towerDown') {
+          hitStop(110);
+          // A crown is the loudest thing that happens in a match; the loop gets out of its way.
+          duckMusic();
+        } else if (e.k === 'deathBlast') hitStop(70);
       }
       acc -= DT;
       steps++;

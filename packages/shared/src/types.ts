@@ -153,6 +153,11 @@ export interface SaveState {
   pendingChests: ChestKey[];
   stats: { depl: number; dmg: number; crown: number; elix: number; chests: number };
   sfx: boolean;
+  /**
+   * Background music, separate from `sfx` because the two get turned off for different
+   * reasons — music goes off to listen to something else, effects go off to be quiet.
+   */
+  music: boolean;
   seen: boolean;
   /**
    * First-match coach marks have been completed or skipped.

@@ -13,16 +13,18 @@
  *    the server rolls, `setSave()` applies the answer; the tap animation only plays what it
  *    was given (handoff §5).
  */
-import { ARENAS, CARD, CHESTS, arenaFor, clamp, fmt, hms, nowMs } from '@crown/shared';
+import { ARENAS, CARD, CHESTS, arenaFor, clamp, fmt, hms, nowMs , TELEMETRY } from '@crown/shared';
 import type { ChestKey } from '@crown/shared';
 import { $, must } from '../dom';
 import { Art, Snd, fitCanvas } from '../engine';
 import { S, onSaveChange, setSave } from '../api/store';
 import { api } from '../api/client';
+import { track } from '../telemetry';
 import { STR } from './strings';
 import { cardNode } from './cards';
 import { openChestFlow } from './chest';
 import { findMatch } from './matchmaking';
+import { bindLeaderboardEntry, openLeaderboard, renderLeaderboardBlock } from './leaderboard';
 import { openSettings } from './settings';
 import { openWallet } from './wallet';
 
@@ -146,6 +148,10 @@ function bindHomeOnce(): void {
   homeBound = true;
   must('#homeBody').addEventListener('click', (e) => {
     const target = e.target as HTMLElement | null;
+    if (target && typeof target.closest === 'function' && target.closest('#lbMore')) {
+      void openLeaderboard();
+      return;
+    }
     // `#btnBattle` lives inside the markup `setTab('home')` re-injects, so the listener has
     // to sit on the container and delegate — that part of the prototype was right.
     if (target && typeof target.closest === 'function' && target.closest('#btnBattle')) void findMatch();
@@ -180,6 +186,11 @@ export function refreshHome(): void {
   });
   must('#deckAvg').textContent = STR.home.deckAvg((tot / 8).toFixed(1));
   renderChests();
+
+  // Fire-and-forget: the board is nice to have, and Home must paint without waiting on it.
+  const lb = $('#lbBlock');
+  if (lb) void renderLeaderboardBlock(lb);
+  bindLeaderboardEntry();
 }
 
 /* -------------------------------------------------------------------- chests */
@@ -195,6 +206,13 @@ function openServerChest(kind: ChestKey, source: 'free' | 'pending', index?: num
   openChestFlow({
     kind,
     result: api.openChest({ source, index }).then((r) => {
+      track(TELEMETRY.chestOpen, {
+        kind: r.kind,
+        source,
+        gold: r.result.gold,
+        gem: r.result.gem,
+        cards: r.result.cards.reduce((a, c) => a + c.n, 0),
+      });
       setSave(r.save);
       return r.result;
     }),

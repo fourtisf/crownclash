@@ -8,12 +8,13 @@
  * Everything visual — frame colours, the progress sliver, the stat rows, the sort order —
  * is the prototype's.
  */
-import { CARD, CARDS, MAX_CARD_LEVEL, RARITY, clamp, fmt, ownsCard, statMul } from '@crown/shared';
+import { CARD, CARDS, MAX_CARD_LEVEL, RARITY, clamp, fmt, matchups, ownsCard, statMul , TELEMETRY } from '@crown/shared';
 import type { Card, RarityKey } from '@crown/shared';
 import { $, must } from '../dom';
 import { Snd, renderPortrait } from '../engine';
 import { S, setSave } from '../api/store';
 import { api } from '../api/client';
+import { track } from '../telemetry';
 import { closeModal, openModal } from '../ui/modal';
 import { toastTop } from '../ui/toast';
 import { setTab } from '../ui/tabs';
@@ -125,6 +126,35 @@ function statRows(card: Card, mul: number): string {
   );
 }
 
+/**
+ * Counter rows — added by the port, no prototype line to cite.
+ *
+ * The stat block tells a player what a card *is* and nothing about what to do with it, so the
+ * two questions that actually decide a match — what do I answer this with, and what answers me
+ * — had no answer anywhere in the game. `matchups()` derives both from the card data using the
+ * sim's own targeting and splash rules; see packages/shared/src/counters.ts for the model.
+ *
+ * Rendered as portraits rather than names because that is what a player has to recognise in
+ * the half second a card spends on the opponent's hand bar.
+ */
+function matchupBlock(cid: string): string {
+  const m = matchups(CARD[cid]);
+  const row = (kind: 'good' | 'bad', label: string, ids: string[]): string =>
+    !ids.length
+      ? ''
+      : '<div class="murow"><div class="mulabel ' + kind + '">' + label + '</div><div class="mus">' +
+        ids
+          .map(
+            (id) =>
+              '<button class="mu" data-mu="' + id + '"><canvas></canvas><span>' + CARD[id].n + '</span></button>',
+          )
+          .join('') +
+        '</div></div>';
+  const strong = row('good', STR.cards.strongAgainst, m.strong);
+  const weak = row('bad', STR.cards.weakAgainst, m.weak);
+  return strong || weak ? '<div class="mublock">' + strong + weak + '</div>' : '';
+}
+
 /** L2625-2671 */
 export function openCardDetail(cid: string, slot?: number): void {
   const card = CARD[cid];
@@ -157,6 +187,7 @@ export function openCardDetail(cid: string, slot?: number): void {
           '" style="width:' + clamp((st.cnt / Math.max(1, need)) * 100, 0, 100) + '%"></i></div></div>'
         : '<p class="sub" style="margin-top:12px">' + STR.cards.notUnlocked + '</p>') +
       '<div style="margin-top:8px">' + stats + '</div>' +
+      matchupBlock(cid) +
       '<div style="display:flex;gap:8px;margin-top:12px">' +
       (owned && st.lv < MAX_CARD_LEVEL
         ? '<button class="btn ' + (canUp ? 'gold' : 'ghost') + '" id="cdUp" style="flex:1" ' +
@@ -169,6 +200,19 @@ export function openCardDetail(cid: string, slot?: number): void {
   const art = $<HTMLCanvasElement>('#cdArt');
   if (art) renderPortrait(art, cid, 86);
 
+  // Tapping a counter opens that card instead. `openModal` swaps `#modal`'s contents in place,
+  // so this walks sideways through the roster rather than stacking sheets the player then has
+  // to close one at a time.
+  document.querySelectorAll<HTMLButtonElement>('#modal [data-mu]').forEach((b) => {
+    const other = b.dataset.mu as string;
+    const cv = b.querySelector('canvas');
+    if (cv) requestAnimationFrame(() => renderPortrait(cv, other, 40));
+    b.onclick = () => {
+      Snd.play(700, 0.05, 'triangle', 0.05);
+      openCardDetail(other);
+    };
+  });
+
   const up = $<HTMLButtonElement>('#cdUp');
   if (up) {
     up.onclick = async () => {
@@ -178,6 +222,8 @@ export function openCardDetail(cid: string, slot?: number): void {
       up.disabled = true;
       try {
         const res = await api.upgradeCard({ cardId: cid });
+      // Which cards players actually invest in — the clearest signal of what feels strong.
+      track(TELEMETRY.cardUpgrade, { card: cid, level: res.level, cost: res.cost });
         setSave(res.save);
         Snd.crown();
         toastTop(STR.cards.upgraded(card.n, res.level));

@@ -2,7 +2,13 @@
  * Every user-visible string in the meta screens, in one place.
  *
  * Handoff §7 — "no renamed anything". The prototype's copy is a deliberate mix of English
- * and Indonesian and it ships unchanged: `BARU!`, `Arena tertinggi!`,
+ * ORIGINALLY these shipped exactly as the prototype wrote them, mixed English and
+ * Indonesian, because handoff §7 said "no renamed anything". The owner has since asked for
+ * one consistent English UI, which supersedes that constraint — a player seeing
+ * "Sudah diambil — balik besok!" in an otherwise English app reads it as a bug, not as
+ * localisation. Card names stay untouched: they are original IP, not copy.
+ *
+ * The strings that changed were: `BARU!`, `Arena tertinggi!`,
  * `Sudah diambil — balik besok!`, `…tersambung`, `…didapat!`, `SUARA: ON/OFF`,
  * `Progress tersimpan otomatis di perangkat ini.` and `hms()`'s `3j 0m` hour suffix (that
  * one lives in `@crown/shared`'s `hms`). Centralising them here means a future localisation
@@ -19,7 +25,7 @@ export const STR = {
   /* ------------------------------------------------------------------- home */
   home: {
     nextArena: (t: number): string => 'Next arena: ' + t + ' 🏆',
-    topArena: 'Arena tertinggi!',
+    topArena: 'Top arena reached!',
     trophies: (n: number): string => n + ' 🏆',
     /** `avg` is already `.toFixed(1)`-formatted by the caller. */
     deckAvg: (avg: string): string => 'Avg ' + avg + ' ⚡',
@@ -79,6 +85,8 @@ export const STR = {
       'Pick a card from your collection for slot ' + (slot + 1),
     addedToDeck: (name: string): string => name + ' added to deck!',
     upgraded: (name: string, lv: number): string => name + ' upgraded to level ' + lv + '!',
+    strongAgainst: 'STRONG AGAINST',
+    weakAgainst: 'WEAK AGAINST',
   },
 
   /* ------------------------------------------------------------------- shop */
@@ -104,7 +112,7 @@ export const STR = {
     tapHint: 'Tap the chest until it opens',
     tap: 'TAP!',
     done: 'NICE!',
-    isNew: 'BARU!',
+    isNew: 'NEW!',
     count: (n: number): string => '×' + n,
     gold: (n: string): string => '🪙 +' + n,
     gem: (n: number): string => '💎 +' + n,
@@ -134,12 +142,12 @@ export const STR = {
     title: 'LOGIN REWARDS',
     streak: (d: number): string => 'Streak ' + d + 'd',
     claimDay: (day: number): string => '🎁 CLAIM DAY ' + (day + 1),
-    alreadyClaimed: 'Sudah diambil — balik besok!',
+    alreadyClaimed: 'Already claimed — come back tomorrow!',
     day: (i: number): string => 'DAY ' + (i + 1),
     claimedToast: (name: string): string => 'Claimed: ' + name,
     connectWallet: 'CONNECT WALLET',
     linked: (kind: string): string =>
-      'Wallet ' + kind + ' tersambung. Airdrop $CROWN dikirim ke sini.',
+      'Wallet ' + kind + ' connected. Your $CROWN airdrop will be sent here.',
     pitch:
       'Link a wallet to claim a one-time 100 💎 bonus and become eligible for the $CROWN airdrop.',
     connectButton: '🔗 CONNECT WALLET',
@@ -190,15 +198,27 @@ export const STR = {
   },
 
   /* --------------------------------------------------------------- settings */
+  leaderboard: {
+    title: 'LEADERBOARD',
+    sub: 'Top 100 by trophies',
+    loading: 'Loading…',
+    empty: 'No ranked players yet — be the first.',
+    unavailable: 'Leaderboard unavailable right now.',
+    heading: 'TOP PLAYERS',
+    viewAll: 'VIEW ALL',
+  },
+
   settings: {
     quality: 'GRAPHICS',
     qualityNames: { low: 'LOW', med: 'MEDIUM', high: 'HIGH' } as const,
     title: 'PROFILE',
     sub: 'Change your name & avatar',
-    sfxOn: '🔊 SUARA: ON',
-    sfxOff: '🔇 SUARA: OFF',
+    sfxOn: '🔊 SOUND: ON',
+    sfxOff: '🔇 SOUND: OFF',
+    musicOn: '🎵 MUSIC: ON',
+    musicOff: '🎵 MUSIC: OFF',
     save: 'SAVE',
-    note: 'Progress tersimpan otomatis di perangkat ini.',
+    note: 'Progress saves automatically to your account.',
     saveFailed: 'Could not save your profile.',
   },
 
@@ -227,7 +247,7 @@ export const STR = {
     /** The trophy row is `🏆 before → <b>after</b>`; the `<b>` is coloured by sign. */
     trophyBefore: (before: number): string => '🏆 ' + before + ' → ',
     goldDelta: (gold: number): string => '🪙 +' + gold,
-    chestEarned: (name: string): string => name + ' didapat!',
+    chestEarned: (name: string): string => name + ' earned!',
     home: 'HOME',
     again: 'PLAY AGAIN',
     /** NEW — the prototype had no server, so a match could never be rejected. */

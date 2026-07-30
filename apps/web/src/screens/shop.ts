@@ -5,12 +5,13 @@
  * the client sends an index, never a price. The published drop-rate table stays exactly
  * where it was: handoff §7 requires the rates remain visible next to the gacha.
  */
-import { CHESTS, SHOP, fmt } from '@crown/shared';
+import { CHESTS, SHOP, fmt , TELEMETRY } from '@crown/shared';
 import type { ChestKey } from '@crown/shared';
 import { must } from '../dom';
 import { Art, Snd, fitCanvas } from '../engine';
 import { S, setSave } from '../api/store';
 import { api } from '../api/client';
+import { track } from '../telemetry';
 import { toastTop } from '../ui/toast';
 import { setTab } from '../ui/tabs';
 import { STR } from './strings';
@@ -53,6 +54,8 @@ export function renderShop(body: HTMLElement): void {
       b.disabled = true;
       try {
         const res = await api.buy({ index });
+        // Which shop slots convert, and in which currency. Without this, pricing is guesswork.
+        track(TELEMETRY.shopBuy, { index, kind: String(it.kind), cur: it.cur, price: it.price });
         setSave(res.save);
         if (res.gold) {
           Snd.coin();

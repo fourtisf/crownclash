@@ -181,6 +181,10 @@ export function sanitizeSave(input: unknown): SaveSanitizeResult {
   s.name = typeof s.name === 'string' && s.name.trim() ? s.name.trim().slice(0, 16) : base.name;
   s.avatar = typeof s.avatar === 'string' ? s.avatar.slice(0, 8) : base.avatar;
   s.sfx = !!s.sfx;
+  // Absent means "written before the setting existed", which is not the same as "turned off" —
+  // so it takes the default rather than `!!undefined`. Every save from before this field was
+  // added would otherwise launch silent, which reads as a bug, not a preference.
+  s.music = s.music === undefined ? base.music : !!s.music;
   s.seen = !!s.seen;
   s.tutorialDone = !!s.tutorialDone;
   s.quality = s.quality === 'low' || s.quality === 'med' ? s.quality : 'high';

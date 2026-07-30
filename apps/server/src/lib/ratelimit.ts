@@ -35,6 +35,12 @@ export const LIMITS = {
   walletLink: { max: 5, timeWindow: '5 minutes' },
   /** Plain reads. */
   read: { max: 60, timeWindow: '1 minute' },
+  /**
+   * Telemetry. Generous because the client batches and flushes on tab-hide, so a player
+   * switching apps repeatedly is normal traffic — but bounded, because this endpoint writes
+   * to the log pipeline and is the cheapest thing on the server to abuse.
+   */
+  telemetry: { max: 30, timeWindow: '1 minute' },
 } as const satisfies Record<string, RouteLimit>;
 
 /** Route `config` block. Ignored harmlessly when the plugin is not registered. */

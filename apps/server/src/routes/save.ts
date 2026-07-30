@@ -28,6 +28,7 @@ const profileSchema = z
     name: z.string().trim().min(1).max(16).optional(),
     avatar: z.string().min(1).max(8).optional(),
     sfx: z.boolean().optional(),
+    music: z.boolean().optional(),
     deck: z.array(z.string()).length(8).optional(),
     seen: z.boolean().optional(),
     tutorialDone: z.boolean().optional(),
@@ -38,6 +39,7 @@ const profileSchema = z
       v.name !== undefined ||
       v.avatar !== undefined ||
       v.sfx !== undefined ||
+      v.music !== undefined ||
       v.deck !== undefined ||
       v.seen !== undefined ||
       v.tutorialDone !== undefined ||
@@ -135,6 +137,7 @@ export async function saveRoutes(app: FastifyInstance): Promise<void> {
           save.avatar = body.avatar;
         }
         if (body.sfx !== undefined) save.sfx = body.sfx;
+        if (body.music !== undefined) save.music = body.music;
         // One-way: the first-run explainer can be dismissed but not un-dismissed, so a stale
         // client cannot make it reappear for someone who has already played.
         if (body.seen === true) save.seen = true;

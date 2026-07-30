@@ -163,6 +163,18 @@ describe('save sanitization (§5 caps)', () => {
     expect(flags.some((f) => f.startsWith('trophies:'))).toBe(true);
   });
 
+  it('treats a missing music flag as "never asked" rather than "turned off"', () => {
+    expect(defaultState().music).toBe(true);
+    // Every save written before the setting existed lacks the field. Coercing it the way `sfx`
+    // is coerced would launch all of them silent, which reads as a bug rather than a choice.
+    const legacy = { ...defaultState() } as Record<string, unknown>;
+    delete legacy.music;
+    expect(sanitizeSave(legacy).save.music).toBe(true);
+    // An explicit false is still honoured.
+    expect(sanitizeSave({ ...defaultState(), music: false }).save.music).toBe(false);
+    expect(sanitizeSave({ ...defaultState(), music: 'yes' }).save.music).toBe(true);
+  });
+
   it('leaves an honest save untouched and unflagged', () => {
     const s = defaultState();
     s.gold = 3200;

@@ -9,7 +9,8 @@
 import { $$, must } from '../dom';
 import { Snd } from '../engine';
 import { S } from '../api/store';
-import { loginReady, nowMs, questsReady } from '@crown/shared';
+import { TELEMETRY, loginReady, nowMs, questsReady } from '@crown/shared';
+import { track } from '../telemetry';
 import { homeTemplate, refreshHome } from '../screens/home';
 import { renderCardsTab } from '../screens/cards';
 import { renderShop } from '../screens/shop';
@@ -79,6 +80,9 @@ export function setTab(name: TabName | string): void {
   else if (name === 'shop') renderShop(body);
   else if (name === 'quest') renderQuests(body);
   else if (name === 'login') renderLogin(body);
+  // Which screens players actually visit, and which they never find. The shop and the card
+  // collection are where the game earns; if nobody opens them that is worth knowing early.
+  track(TELEMETRY.screenView, { tab: String(name) });
 }
 
 /**

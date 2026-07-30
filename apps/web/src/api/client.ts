@@ -18,7 +18,8 @@ import { API_ERRORS, API_PREFIX } from '@crown/shared';
 import type {
   ApiError, AuthResponse, ChestOpenRequest, ChestOpenResponse, LeaderboardResponse,
   LoginClaimResponse, MatchFinishRequest, MatchFinishResponse, MatchStartResponse,
-  ProfileUpdateRequest, QuestClaimRequest, QuestClaimResponse, SaveResponse, ShopBuyRequest,
+  ProfileUpdateRequest, QuestClaimRequest, QuestClaimResponse, RecoveryCreateResponse,
+  SaveResponse, ShopBuyRequest,
   ShopBuyResponse, UpgradeCardRequest, UpgradeCardResponse, WalletLinkRequest,
   WalletLinkResponse, WalletNonceRequest, WalletNonceResponse,
 } from '@crown/shared';
@@ -86,6 +87,11 @@ export const api = {
   walletNonce: (req: WalletNonceRequest) => post<WalletNonceResponse>('/auth/wallet/nonce', req),
   walletLink: (req: WalletLinkRequest) => post<WalletLinkResponse>('/auth/wallet/link', req),
   walletUnlink: () => post<SaveResponse>('/auth/wallet/unlink'),
+
+  /* recovery */
+  createRecovery: () => post<RecoveryCreateResponse>('/auth/recovery'),
+  redeemRecovery: (code: string, deviceId: string) =>
+    post<AuthResponse>('/auth/recovery/redeem', { code, deviceId }),
 
   /* save */
   loadSave: () => get<SaveResponse>('/save'),

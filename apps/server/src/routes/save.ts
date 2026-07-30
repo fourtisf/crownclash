@@ -33,6 +33,7 @@ const profileSchema = z
     seen: z.boolean().optional(),
     tutorialDone: z.boolean().optional(),
     quality: z.enum(['low', 'med', 'high']).optional(),
+    recoveryAsked: z.boolean().optional(),
   })
   .refine(
     (v) =>
@@ -43,7 +44,8 @@ const profileSchema = z
       v.deck !== undefined ||
       v.seen !== undefined ||
       v.tutorialDone !== undefined ||
-      v.quality !== undefined,
+      v.quality !== undefined ||
+      v.recoveryAsked !== undefined,
     { message: 'no fields to update' },
   );
 
@@ -145,6 +147,8 @@ export async function saveRoutes(app: FastifyInstance): Promise<void> {
       // who has already played sit through the coach marks again.
       if (body.tutorialDone === true) save.tutorialDone = true;
       if (body.quality !== undefined) save.quality = body.quality;
+      // One-way, same as `seen` and `tutorialDone`.
+      if (body.recoveryAsked === true) save.recoveryAsked = true;
         if (body.deck !== undefined) {
           // Re-validated on every attempt: a retry runs against a freshly-read save, and a deck
           // is only legal relative to the cards that save owns.

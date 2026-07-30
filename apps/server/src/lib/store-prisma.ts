@@ -16,7 +16,7 @@ import type {
   LeaderboardRow, MatchCompleteInput, MatchCreateInput, MatchRow, NonceRow, SavePutMeta, SaveRow,
   Store, UserRow,
 } from './store.js';
-import { SaveConflictError, WalletConflictError } from './store.js';
+import { SaveConflictError, WalletConflictError, orphanDeviceId } from './store.js';
 
 const toUser = (u: DbUser): UserRow => ({
   id: u.id,
@@ -25,6 +25,8 @@ const toUser = (u: DbUser): UserRow => ({
   walletKind: u.walletKind,
   airdropEligible: u.airdropEligible,
   createdAt: u.createdAt,
+  recoveryHash: u.recoveryHash,
+  recoveryAt: u.recoveryAt,
 });
 
 const toSave = (s: DbSave): SaveRow => ({
@@ -97,6 +99,12 @@ export class PrismaStore implements Store {
     return u ? toUser(u) : null;
   }
 
+  async userByRecoveryHash(hash: string): Promise<UserRow | null> {
+    const db = await this.client();
+    const u = await db.user.findUnique({ where: { recoveryHash: hash } });
+    return u ? toUser(u) : null;
+  }
+
   async createUser(input: { deviceId: string; save: SaveState }): Promise<UserRow> {
     const db = await this.client();
     // Nested create: a User without a Save is a state no route knows how to handle, so the
@@ -128,6 +136,30 @@ export class PrismaStore implements Store {
       if (isUniqueViolation(err)) throw new WalletConflictError();
       throw err;
     }
+  }
+
+  async setRecoveryHash(userId: string, hash: string, at: Date): Promise<UserRow> {
+    const db = await this.client();
+    const u = await db.user.update({ where: { id: userId }, data: { recoveryHash: hash, recoveryAt: at } });
+    return toUser(u);
+  }
+
+  /**
+   * One transaction, because `deviceId` is unique: the row holding it has to let go in the
+   * same statement batch that hands it over, or the second write hits the constraint. The
+   * displaced account keeps its save and its wallet and simply becomes unreachable by device
+   * id — if it had a wallet or a recovery code of its own, those still open it.
+   */
+  async adoptDevice(userId: string, deviceId: string): Promise<UserRow> {
+    const db = await this.client();
+    return db.$transaction(async (tx) => {
+      const holder = await tx.user.findUnique({ where: { deviceId } });
+      if (holder && holder.id !== userId) {
+        await tx.user.update({ where: { id: holder.id }, data: { deviceId: orphanDeviceId() } });
+      }
+      const u = await tx.user.update({ where: { id: userId }, data: { deviceId } });
+      return toUser(u);
+    });
   }
 
   async touchUser(userId: string, at: Date): Promise<void> {

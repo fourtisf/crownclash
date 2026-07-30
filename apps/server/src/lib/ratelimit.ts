@@ -31,6 +31,13 @@ export const LIMITS = {
   authGuest: { max: 10, timeWindow: '1 minute' },
   /** Nonce issuance is cheap but unauthenticated — cap it hard. */
   walletNonce: { max: 5, timeWindow: '1 minute' },
+  /** Issuing a code is cheap but rotating it invalidates the old one — no reason to be fast. */
+  recoveryCreate: { max: 5, timeWindow: '1 minute' },
+  /**
+   * The only online guess against a 100-bit code. Even at this rate the search takes longer
+   * than the universe has had, but it also keeps a stolen-code-list replay from being quick.
+   */
+  recoveryRedeem: { max: 5, timeWindow: '5 minutes' },
   /** Signature verification is expensive and is the account-takeover surface. */
   walletLink: { max: 5, timeWindow: '5 minutes' },
   /** Plain reads. */

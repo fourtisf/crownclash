@@ -319,3 +319,101 @@
   height: 2px; margin: 6px 12px;
   background: repeating-linear-gradient(90deg, rgba(255,255,255,.22) 0 5px, transparent 5px 10px);
 }
+
+/* ---------------------------------------------------------------- recovery */
+
+/*
+ * Lift a modal above the landing page — opt-in, one modal at a time.
+ *
+ * `styles.css` puts `.ovl` at z-index 20 and `#landing` at 60. That gap is load-bearing: the
+ * first-run welcome modal is opened during boot, while the landing is still covering the
+ * screen, and it is *supposed* to wait underneath until the player taps PLAY NOW. Raising
+ * `.ovl` for everyone breaks that — the welcome sheet lands on top of the hero and blocks the
+ * button it is waiting for.
+ *
+ * Restoring an account is the one flow that genuinely runs *from* the landing, so it asks for
+ * the elevation explicitly and gives it back on close.
+ */
+#ovl.abovelanding { z-index: 70 }
+#ovl2.abovelanding { z-index: 71 }
+/* Toasts stay above whatever is showing, which now includes the landing. */
+.toast { z-index: 80 }
+
+/*
+ * The landing-page way back in. Deliberately quiet — it is below PLAY NOW and styled as a
+ * link, because it is the right answer for a small minority of arrivals and noise for
+ * everyone else. It still has to be findable by someone who has just lost an account.
+ */
+.lp-recover {
+  display: block;
+  margin: 10px auto 0;
+  padding: 6px 10px;
+  /*
+   * Above the bouncing `▾` chevron, which is `position:absolute; bottom:16px` and lands
+   * directly on top of this button at short viewport heights — it was swallowing every tap.
+   */
+  position: relative;
+  z-index: 2;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  cursor: pointer;
+  color: #a9b7de;
+  background: none;
+  border: 0;
+  border-bottom: 2px dotted rgba(169, 183, 222, .55);
+}
+.lp-recover:hover { color: var(--gold) }
+.lp-recover:active { transform: translateY(1px) }
+
+/*
+ * The code itself. Monospace and wide-tracked so `0`/`O` and `1`/`I` are distinguishable on
+ * paper — the alphabet already excludes the ambiguous letters, but a player copying this by
+ * hand still has to read it correctly.
+ */
+.rcode {
+  margin: 12px 0 10px;
+  padding: 13px 8px 14px;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  line-height: 1.6;
+  text-align: center;
+  word-break: break-all;
+  color: #fff2cd;
+  border: 2.5px solid var(--ink);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .5), rgba(0, 0, 0, .3));
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, .55);
+  /* Selectable: copy-by-drag has to work when the clipboard API is blocked. */
+  user-select: all;
+}
+
+.rcwarn {
+  margin-top: 10px;
+  padding: 9px 11px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.55;
+  text-align: left;
+  color: #ffd9a8;
+  border: 2px solid rgba(0, 0, 0, .4);
+  border-radius: 10px;
+  background: rgba(255, 176, 74, .12);
+}
+
+.rcinput {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  letter-spacing: 1.2px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.rcerr {
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #ff9a8a;
+}
+.rcerr[hidden] { display: none }

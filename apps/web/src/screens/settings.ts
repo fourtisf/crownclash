@@ -11,6 +11,7 @@ import { $$, must } from '../dom';
 import { Snd, setSfxEnabled } from '../engine';
 import { setQuality } from '../gfx';
 import { setMusicEnabled } from '../music';
+import { hasRecovery, openRecovery } from './recovery';
 import { S, setSave } from '../api/store';
 import { api } from '../api/client';
 import { closeModal, openModal } from '../ui/modal';
@@ -43,6 +44,10 @@ export function openSettings(): void {
       (S.sfx ? STR.settings.sfxOn : STR.settings.sfxOff) + '</button>' +
       '<button class="btn ' + (S.music ? 'green' : 'ghost') + '" id="stMusic" style="width:100%;margin-bottom:8px">' +
       (S.music ? STR.settings.musicOn : STR.settings.musicOff) + '</button>' +
+      // Marked when there is no code yet: an account with no way back is the one setting on
+      // this sheet that costs the player everything if they never look at it.
+      '<button class="btn ' + (hasRecovery() ? 'ghost' : 'gold') + '" id="stRecover" style="width:100%;margin-bottom:8px">' +
+      STR.settings.recovery + (hasRecovery() ? '' : ' ⚠️') + '</button>' +
       // Graphics preset. Applied the moment it is tapped rather than on SAVE, because the
       // only way to judge it is to look at it — and the arena is one tap away.
       '<div class="qlabel">' + STR.settings.quality + '</div>' +
@@ -149,6 +154,10 @@ export function openSettings(): void {
       music.disabled = false;
     }
   };
+
+  // Opens at level 2, on top of this sheet, so dismissing the code returns here rather than
+  // dumping the player back on Home mid-thought.
+  must<HTMLButtonElement>('#stRecover').onclick = () => openRecovery(2);
 
   // Graphics preset: apply immediately and persist immediately. It is a device preference,
   // not part of the name/avatar draft that SAVE commits.

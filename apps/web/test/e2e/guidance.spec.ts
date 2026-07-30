@@ -126,3 +126,53 @@ test.describe('music', () => {
     await expect(page.locator('#stMusic')).toHaveText(/MUSIC: OFF/, { timeout: 20_000 });
   });
 });
+
+test.describe('account recovery', () => {
+  test.setTimeout(180_000);
+
+  test('a code brings the account back in a browser that has never seen it', async ({ browser }) => {
+    // Two independent contexts is the whole point: separate storage means a separate device
+    // id, which is exactly the situation a player is in on a new phone.
+    const original = await browser.newContext();
+    const originalPage = await original.newPage();
+    await enterApp(originalPage);
+
+    // Make the account distinguishable so "did the save follow the code" has a visible answer.
+    await originalPage.locator('#avatarBox').click();
+    await originalPage.locator('#stName').fill('RecoveredHero');
+    await originalPage.locator('#stSave').click();
+    await expect(originalPage.locator('#modal')).toBeHidden({ timeout: 15_000 });
+
+    await originalPage.locator('#avatarBox').click();
+    await originalPage.locator('#stRecover').click();
+    await originalPage.locator('#rcMake').click();
+    const code = (await originalPage.locator('#rcCode').textContent({ timeout: 20_000 }))?.trim() ?? '';
+    expect(code).toMatch(/^[0-9A-Z]{5}(-[0-9A-Z]{5}){3}$/);
+    await original.close();
+
+    const fresh = await browser.newContext();
+    const freshPage = await fresh.newPage();
+    await enterApp(freshPage);
+    // A brand-new account, as it would be after clearing storage.
+    await expect(freshPage.locator('#hName')).not.toHaveText('RecoveredHero');
+
+    await freshPage.reload();
+    await freshPage.locator('#lpRecover').click();
+    await freshPage.locator('#rcIn').fill(code);
+    await freshPage.locator('#rcGo').click();
+
+    // The page reloads itself on success, and boots signed in as the recovered account.
+    await expect(freshPage.locator('#hName')).toHaveText('RecoveredHero', { timeout: 40_000 });
+    await fresh.close();
+  });
+
+  test('a wrong code is refused without saying why', async ({ page }) => {
+    await enterApp(page);
+    await page.reload();
+    await page.locator('#lpRecover').click();
+    await page.locator('#rcIn').fill('ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ');
+    await page.locator('#rcGo').click();
+    await expect(page.locator('#rcErr')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#rcErr')).toContainText('does not match');
+  });
+});

@@ -19,7 +19,7 @@ export function defaultState(): SaveState {
     wins: 0, losses: 0, cards: {}, deck: STARTER_DECK.slice(),
     quests: { date: '', list: [] }, login: { day: 0, last: '', streak: 0 },
     freeChestAt: 0, pendingChests: [], stats: { depl: 0, dmg: 0, crown: 0, elix: 0, chests: 0 }, sfx: true, music: true, seen: false,
-    tutorialDone: false, quality: 'high',
+    tutorialDone: false, quality: 'high', recoveryAsked: false,
   };
   for (const id of STARTER_CARDS) st.cards[id] = { lv: 1, cnt: 0 };
   return st;

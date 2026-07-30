@@ -19,6 +19,7 @@ import { toastTop } from './ui/toast';
 import { markDots, setTab } from './ui/tabs';
 import { drawMiniArena, initLanding, refreshHeader, renderChests } from './screens/home';
 import { invalidateLeaderboard } from './screens/leaderboard';
+import { bindRecoveryEntry, maybePromptRecovery, setHasRecovery } from './screens/recovery';
 import { findMatch } from './screens/matchmaking';
 import { showResult } from './screens/result';
 import { TELEMETRY } from '@crown/shared';
@@ -64,7 +65,17 @@ async function finishMatch(
     // player is about to land on has to reflect the match they just played.
     invalidateLeaderboard();
     markDots();
-    showResult(res, { onHome: () => { go('home'); setTab('home'); }, onAgain: () => void findMatch(startBattle) });
+    showResult(res, {
+      onHome: () => {
+        go('home');
+        setTab('home');
+        // Offered here rather than over the result screen: the player has just been told they
+        // won, which is the moment the account is worth protecting to them. Delayed so it
+        // lands after the screen settles instead of on top of the transition.
+        setTimeout(maybePromptRecovery, 600);
+      },
+      onAgain: () => void findMatch(startBattle),
+    });
   } catch (err) {
     if (err instanceof ApiFailure && (err.isOffline || err.status >= 500)) {
       await queueIntent('match', { matchId, deployLog, ...opts });
@@ -141,13 +152,15 @@ async function init(): Promise<void> {
     result = await boot();
   } catch {
     toastTop('Could not reach the server — playing from your last saved state');
-    result = { online: false, created: false, migrated: false };
+    result = { online: false, created: false, migrated: false, hasRecovery: false };
   }
 
   setSfxEnabled(S.sfx);
   setQuality(S.quality);
   setMusicEnabled(S.music);
   initMusic();
+  setHasRecovery(result.hasRecovery);
+  bindRecoveryEntry();
   onSaveChange((s) => {
     setSfxEnabled(s.sfx);
     setQuality(s.quality);

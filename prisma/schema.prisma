@@ -30,6 +30,14 @@ model User {
   /// NOT NULL without inventing a fake device.
   deviceId String @unique
 
+  /// HMAC-SHA256 of the player's recovery code. The code itself is shown once and never
+  /// stored, so a database dump cannot be used to take over accounts. `@unique` both indexes
+  /// the redemption lookup and guarantees one code never opens two accounts.
+  recoveryHash String? @unique
+  /// When the current code was issued. Shown in the UI so a player can tell whether the code
+  /// they wrote down is still the live one after a rotation.
+  recoveryAt   DateTime?
+
   /// Lower-cased for EVM, verbatim base58 for Solana (base58 is case-significant).
   /// `@unique` is what enforces "one wallet, one account" — the walletTaken check reads it.
   wallet          String? @unique

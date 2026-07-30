@@ -168,6 +168,13 @@ export interface SaveState {
   tutorialDone: boolean;
   /** Graphics preset. Absent on old saves ⇒ 'high', then auto-degraded at runtime. */
   quality: Quality;
+  /**
+   * The "save a recovery code" prompt has been shown after a first win.
+   *
+   * One-way, like `seen` and `tutorialDone`: the offer stands permanently in Settings, so
+   * re-showing the modal would only train players to dismiss it.
+   */
+  recoveryAsked: boolean;
 }
 
 /* ------------------------------------------------------------------ simulation */

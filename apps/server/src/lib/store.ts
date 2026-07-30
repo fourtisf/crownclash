@@ -11,7 +11,34 @@
  * things this server exists to prevent (double payouts, replayed signatures) come straight
  * back under concurrency.
  */
+import { randomUUID } from 'node:crypto';
 import type { DeployLogEntry, MatchOutcome, SaveState, SimConfig } from '@crown/shared';
+
+/**
+ * Device-id namespaces the server writes and a browser must never be able to present.
+ *
+ * `/api/auth/guest` authenticates on the device id alone — presenting one *is* presenting a
+ * credential — so any id the server derives or parks has to be unreachable from that endpoint:
+ *
+ *  - `wallet:` — synthetic id for an account created by a wallet signature (`walletDeviceId`).
+ *    Derived from a public address, so if it were reachable the credential would be public.
+ *  - `orphan:` — where a device id goes when `adoptDevice` takes it away. Random and dead by
+ *    construction; nothing should ever be able to log in as a displaced row.
+ *
+ * Real client ids are 32 hex characters (apps/web/src/api/store.ts), so the colon rules out
+ * nothing legitimate.
+ */
+export const RESERVED_DEVICE_PREFIXES = ['wallet:', 'orphan:'] as const;
+
+export function isReservedDeviceId(deviceId: string): boolean {
+  const v = deviceId.trim().toLowerCase();
+  return RESERVED_DEVICE_PREFIXES.some((p) => v.startsWith(p));
+}
+
+/** A fresh, unusable device id for an account that just had its real one taken. */
+export function orphanDeviceId(): string {
+  return `orphan:${randomUUID()}`;
+}
 
 /**
  * Thrown when a wallet is already bound to a different `User`. Both stores raise this same
@@ -33,6 +60,9 @@ export interface UserRow {
   walletKind: string | null;
   airdropEligible: boolean;
   createdAt: Date;
+  /** HMAC of the account's recovery code, or null when the player has never made one. */
+  recoveryHash: string | null;
+  recoveryAt: Date | null;
 }
 
 /** Thrown by `putSave` when `expectedVersion` no longer matches the stored row. */
@@ -135,6 +165,8 @@ export interface Store {
   userByDeviceId(deviceId: string): Promise<UserRow | null>;
   /** `wallet` is already normalised by `wallet.ts` (lower-case for EVM, verbatim base58). */
   userByWallet(wallet: string): Promise<UserRow | null>;
+  /** Redemption lookup. Served by the unique index on `recoveryHash`. */
+  userByRecoveryHash(hash: string): Promise<UserRow | null>;
   /** Creates the user and its Save row together; the two never exist apart. */
   createUser(input: { deviceId: string; save: SaveState }): Promise<UserRow>;
   setWallet(
@@ -142,6 +174,18 @@ export interface Store {
     patch: { wallet: string | null; walletKind: string | null; airdropEligible: boolean },
   ): Promise<UserRow>;
   touchUser(userId: string, at: Date): Promise<void>;
+  /** Issue or rotate a recovery code. Replacing a hash kills the code it was made from. */
+  setRecoveryHash(userId: string, hash: string, at: Date): Promise<UserRow>;
+  /**
+   * Move `deviceId` onto `userId`, taking it from whichever account currently holds it.
+   *
+   * Must be atomic: `deviceId` is unique, so assigning it while another row still holds it is
+   * a constraint violation, and doing it in two steps leaves a window where no row owns the
+   * device at all. The displaced account is *orphaned* rather than deleted — the same rule the
+   * wallet-adoption path follows, because redeeming a code should never be able to destroy a
+   * row that might still hold somebody's progress.
+   */
+  adoptDevice(userId: string, deviceId: string): Promise<UserRow>;
 
   /* -------------------------------------------------------------------- saves */
   getSave(userId: string): Promise<SaveRow | null>;

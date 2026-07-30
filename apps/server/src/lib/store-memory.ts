@@ -19,7 +19,7 @@ import type {
   LeaderboardRow, MatchCompleteInput, MatchCreateInput, MatchRow, NonceRow, SavePutMeta, SaveRow,
   Store, UserRow,
 } from './store.js';
-import { WalletConflictError } from './store.js';
+import { WalletConflictError, orphanDeviceId } from './store.js';
 
 // `structuredClone`, not a JSON round-trip: the `Store` interface returns real `Date`s and a
 // JSON clone would hand back strings, so the memory store would quietly disagree with Prisma
@@ -52,6 +52,11 @@ export class MemoryStore implements Store {
     return null;
   }
 
+  async userByRecoveryHash(hash: string): Promise<UserRow | null> {
+    for (const u of this.users.values()) if (u.recoveryHash && u.recoveryHash === hash) return { ...u };
+    return null;
+  }
+
   async createUser(input: { deviceId: string; save: SaveState }): Promise<UserRow> {
     const existing = await this.userByDeviceId(input.deviceId);
     if (existing) throw new Error('duplicate deviceId');
@@ -62,6 +67,8 @@ export class MemoryStore implements Store {
       walletKind: null,
       airdropEligible: false,
       createdAt: new Date(),
+      recoveryHash: null,
+      recoveryAt: null,
     };
     this.users.set(user.id, user);
     this.saves.set(user.id, {
@@ -92,6 +99,31 @@ export class MemoryStore implements Store {
     u.walletKind = patch.walletKind;
     u.airdropEligible = patch.airdropEligible;
     return { ...u };
+  }
+
+  async setRecoveryHash(userId: string, hash: string, at: Date): Promise<UserRow> {
+    const u = this.users.get(userId);
+    if (!u) throw new Error('user not found');
+    for (const other of this.users.values()) {
+      if (other.id !== userId && other.recoveryHash === hash) throw new Error('duplicate recoveryHash');
+    }
+    u.recoveryHash = hash;
+    u.recoveryAt = at;
+    return { ...u };
+  }
+
+  /**
+   * Single-threaded here, so "atomic" is free — but the displaced row still gets orphaned
+   * rather than dropped, because the tests that cover the Postgres path run against this one.
+   */
+  async adoptDevice(userId: string, deviceId: string): Promise<UserRow> {
+    const target = this.users.get(userId);
+    if (!target) throw new Error('user not found');
+    for (const other of this.users.values()) {
+      if (other.id !== userId && other.deviceId === deviceId) other.deviceId = orphanDeviceId();
+    }
+    target.deviceId = deviceId;
+    return { ...target };
   }
 
   async touchUser(): Promise<void> {

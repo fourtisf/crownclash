@@ -50,6 +50,8 @@ export interface DbUser {
   wallet: string | null;
   walletKind: string | null;
   airdropEligible: boolean;
+  recoveryHash: string | null;
+  recoveryAt: Date | null;
   createdAt: Date;
   lastSeenAt: Date;
 }
@@ -99,11 +101,20 @@ export interface DbWalletNonce {
   createdAt: Date;
 }
 
+/** The delegates a transaction callback gets. Same surface, minus connection management. */
+export type PrismaTx = Omit<PrismaLike, '$disconnect' | '$transaction'>;
+
 export interface PrismaLike {
   user: PrismaDelegate<DbUser>;
   save: PrismaDelegate<DbSave>;
   match: PrismaDelegate<DbMatch>;
   walletNonce: PrismaDelegate<DbWalletNonce>;
+  /**
+   * Interactive transaction. Needed by `adoptDevice`, where a unique device id has to move
+   * between two rows — the release and the claim are not separable without either violating
+   * the constraint or leaving the device owned by nobody.
+   */
+  $transaction<T>(fn: (tx: PrismaTx) => Promise<T>): Promise<T>;
   $disconnect(): Promise<void>;
 }
 

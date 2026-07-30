@@ -187,6 +187,7 @@ export function sanitizeSave(input: unknown): SaveSanitizeResult {
   s.music = s.music === undefined ? base.music : !!s.music;
   s.seen = !!s.seen;
   s.tutorialDone = !!s.tutorialDone;
+  s.recoveryAsked = !!s.recoveryAsked;
   s.quality = s.quality === 'low' || s.quality === 'med' ? s.quality : 'high';
   s.v = 1;
 

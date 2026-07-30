@@ -25,38 +25,54 @@
 import { createHmac } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { API_ERRORS, defaultState, type AuthResponse, type WalletLinkResponse, type WalletNonceResponse } from '@crown/shared';
+import {
+  API_ERRORS, defaultState,
+  type AuthResponse, type RecoveryCreateResponse, type WalletLinkResponse, type WalletNonceResponse,
+} from '@crown/shared';
 import { clearSession, issueSession, requireUser } from '../lib/auth.js';
 import { HttpError, badRequest, unauthorized } from '../lib/errors.js';
 import { LIMITS, limit } from '../lib/ratelimit.js';
 import { hasProgress, loadSave, mutateSave, repairSave } from '../lib/saves.js';
-import { WalletConflictError, type Store, type UserRow } from '../lib/store.js';
+import { WalletConflictError, isReservedDeviceId, type Store, type UserRow } from '../lib/store.js';
 import { buildChallenge, extractNonce, normalizeAddress, verifyWalletSignature, type WalletKind } from '../lib/wallet.js';
+import { generateCode, hashCode, looksLikeCode } from '../lib/recovery.js';
 import { env } from '../lib/env.js';
 
 /** +100 gems, once per account, server-side (handoff §3.3). */
 export const WALLET_BONUS_GEMS = 100;
 
 /**
- * Device ids for wallet-first accounts live in a reserved namespace (see `walletDeviceId`).
- * `/api/auth/guest` authenticates on the device id ALONE — presenting one is presenting a
- * credential — so the namespace has to be unreachable from this endpoint. Without this guard,
- * anyone who could guess a wallet account's device id would be handed that account's session.
- *
- * Real client ids are 32 hex characters (apps/web/src/api/store.ts), so nothing legitimate
- * contains a colon and this rejects no real device.
+ * Any endpoint that accepts a device id has to refuse the namespaces the server writes for
+ * itself — `wallet:` and `orphan:`, both defined and explained in `lib/store.ts`. Device ids
+ * are bearer credentials here, so a reachable synthetic id is a reachable account.
  */
-const RESERVED_DEVICE_PREFIX = 'wallet:';
+const deviceIdSchema = z
+  .string()
+  .trim()
+  .min(8)
+  .max(128)
+  .refine((v) => !isReservedDeviceId(v), { message: 'deviceId uses a reserved namespace' });
 
-const guestSchema = z.object({
-  deviceId: z
-    .string()
-    .trim()
-    .min(8)
-    .max(128)
-    .refine((v) => !v.toLowerCase().startsWith(RESERVED_DEVICE_PREFIX), {
-      message: 'deviceId uses a reserved namespace',
-    }),
+const guestSchema = z.object({ deviceId: deviceIdSchema });
+
+/**
+ * Redemption moves the account onto the calling device, so it takes a device id and is held
+ * to exactly the same namespace rules as `/auth/guest` — otherwise this endpoint would be a
+ * way to park an account on an id that endpoint refuses to serve.
+ */
+/**
+ * The single rejection message. Malformed and simply-wrong codes are answered identically,
+ * down to the detail string, so nothing about the response can be used to tell which codes
+ * exist or how close a guess was.
+ */
+const RECOVERY_REJECT = 'that code does not match an account';
+
+const redeemSchema = z.object({
+  // Bounded, but deliberately not length-checked here: `looksLikeCode` is the only shape gate,
+  // so every bad code fails the same way with the same status. A schema rejection would give a
+  // 400 where a wrong-but-well-formed code gives a 401, and that difference is an oracle.
+  code: z.string().trim().min(1).max(64),
+  deviceId: deviceIdSchema,
 });
 
 /**
@@ -74,7 +90,7 @@ const guestSchema = z.object({
  */
 function walletDeviceId(kind: WalletKind, wallet: string): string {
   const mac = createHmac('sha256', env.AUTH_SECRET).update(`${kind}:${wallet}`).digest('hex');
-  return `${RESERVED_DEVICE_PREFIX}${kind}:${mac}`;
+  return `wallet:${kind}:${mac}`;
 }
 
 const kindSchema = z.enum(['evm', 'solana']);
@@ -105,6 +121,7 @@ async function authBody(store: Store, user: UserRow, created: boolean): Promise<
     airdropEligible: user.airdropEligible,
     save: await repairSave(store, user),
     created,
+    hasRecovery: !!user.recoveryHash,
   };
 }
 
@@ -144,6 +161,68 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
     return authBody(store, user, false);
   });
+
+  /**
+   * Issue or rotate this account's recovery code.
+   *
+   * The plaintext is returned exactly once and then exists only in whatever the player did
+   * with it. Rotating is the same call: the new hash overwrites the old, which kills the
+   * previous code — that is the only lever anyone has if they think a code has been seen.
+   */
+  app.post(
+    '/api/auth/recovery',
+    { preHandler: requireUser, config: limit(LIMITS.recoveryCreate) },
+    async (req: FastifyRequest): Promise<RecoveryCreateResponse> => {
+      const user = await store.userById(req.userId!);
+      if (!user) throw unauthorized('session refers to a deleted account');
+      const code = generateCode();
+      const at = new Date();
+      await store.setRecoveryHash(user.id, hashCode(env.AUTH_SECRET, code), at);
+      return { code, issuedAt: at.toISOString(), replaced: !!user.recoveryHash };
+    },
+  );
+
+  /**
+   * Redeem a code: move the account onto this device and sign in.
+   *
+   * The rebind is the point. `boot()` signs in with the browser's device id on every launch,
+   * so handing back only a cookie would strand the player again as soon as it expired — the
+   * device id has to start resolving to the recovered account, which is what `adoptDevice`
+   * does.
+   *
+   * The progress guard mirrors the wallet-adoption rule a few routes down, for the same
+   * reason: proof of ownership is proof of ownership, but if the browser presenting it has an
+   * account with real progress on it, recovering would quietly abandon that progress. Refuse
+   * and let the player decide, rather than guess which of the two they meant to keep.
+   */
+  app.post(
+    '/api/auth/recovery/redeem',
+    { config: limit(LIMITS.recoveryRedeem) },
+    async (req: FastifyRequest, reply: FastifyReply): Promise<AuthResponse> => {
+      const { code, deviceId } = parse(redeemSchema, req.body);
+      // Shape check before the lookup: a malformed code is not worth a database round trip,
+      // and it keeps the rate limit budget for attempts that could actually be real.
+      if (!looksLikeCode(code)) throw new HttpError(401, API_ERRORS.badRecoveryCode, RECOVERY_REJECT);
+
+      const target = await store.userByRecoveryHash(hashCode(env.AUTH_SECRET, code));
+      // Deliberately the same error and the same shape as a well-formed miss: nothing here
+      // should let someone probe which codes exist.
+      if (!target) throw new HttpError(401, API_ERRORS.badRecoveryCode, RECOVERY_REJECT);
+
+      const caller = req.userId ? await store.userById(req.userId) : null;
+      if (caller && caller.id !== target.id) {
+        const { save } = await loadSave(store, caller);
+        if (hasProgress(save)) {
+          throw new HttpError(409, API_ERRORS.recoveryConflict, 'this browser already has an account with progress');
+        }
+      }
+
+      const user = caller && caller.id === target.id ? target : await store.adoptDevice(target.id, deviceId);
+      await store.touchUser(user.id, new Date());
+      await issueSession(reply, user.id);
+      return authBody(store, user, false);
+    },
+  );
 
   app.post('/api/auth/logout', async (_req: FastifyRequest, reply: FastifyReply) => {
     clearSession(reply);

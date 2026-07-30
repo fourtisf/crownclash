@@ -89,6 +89,37 @@ export const STR = {
     weakAgainst: 'WEAK AGAINST',
   },
 
+  /* --------------------------------------------------------------- recovery */
+  recovery: {
+    title: 'RECOVERY CODE',
+    subNone: 'Your account lives in this browser. A code is the only way to get it back.',
+    subHas: 'You already have a code. Making a new one turns the old one off.',
+    explain:
+      'Clearing your browser data, switching phones, or a browser tidying up storage will ' +
+      'sign you out for good. A recovery code brings your account back on any device.',
+    create: '🔑 CREATE MY CODE',
+    rotate: '🔄 CREATE A NEW CODE',
+    rotateConfirm: 'Your old code will stop working. Continue?',
+    createFailed: 'Could not create a code — try again',
+    savedTitle: 'WRITE THIS DOWN',
+    savedSub: 'This is the only time it will be shown.',
+    copy: '📋 COPY CODE',
+    copied: '✅ COPIED',
+    copyFailed: 'Copy it by hand',
+    warning: 'Nobody can recover this for you — not even support. Keep it somewhere safe.',
+    done: 'I SAVED IT',
+    later: 'NOT NOW',
+    promptTitle: 'FIRST WIN!',
+    promptSub: 'Worth keeping. Make a code so this account cannot be lost.',
+    redeemTitle: 'RESTORE ACCOUNT',
+    redeemSub: 'Enter the recovery code you saved.',
+    placeholder: 'XXXXX-XXXXX-XXXXX-XXXXX',
+    redeem: 'RESTORE',
+    redeemFailed: 'That code does not match an account',
+    redeemed: (name: string): string => 'Welcome back, ' + name + '!',
+    haveCode: 'Already playing? Restore your account',
+  },
+
   /* ------------------------------------------------------------------- shop */
   shop: {
     title: 'CHEST SHOP',
@@ -215,6 +246,7 @@ export const STR = {
     sub: 'Change your name & avatar',
     sfxOn: '🔊 SOUND: ON',
     sfxOff: '🔇 SOUND: OFF',
+    recovery: '🔑 RECOVERY CODE',
     musicOn: '🎵 MUSIC: ON',
     musicOff: '🎵 MUSIC: OFF',
     save: 'SAVE',
@@ -275,6 +307,9 @@ export const STR = {
     notEnough: "You don't have enough for that.",
     nothingToClaim: 'Nothing to claim there right now.',
     walletTaken: 'That wallet is already linked to another account.',
+    badRecoveryCode: 'That code does not match an account. Check it and try again.',
+    recoveryConflict:
+      'This browser already has an account with progress on it. Restoring would abandon it.',
     badSignature: 'That signature could not be verified.',
   },
 } as const;

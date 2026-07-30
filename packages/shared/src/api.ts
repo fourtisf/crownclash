@@ -28,6 +28,47 @@ export interface AuthResponse {
   save: SaveState;
   /** True when this call created the account. */
   created: boolean;
+  /**
+   * A recovery code has been issued for this account.
+   *
+   * Never the code itself — only its hash is stored, so nothing can hand it back. This flag
+   * exists so the client knows whether it still needs to ask the player to make one.
+   */
+  hasRecovery: boolean;
+}
+
+/* ------------------------------------------------------------------- recovery */
+
+/**
+ * Account recovery.
+ *
+ * A guest account is identified by a random device id in the browser's IndexedDB and nothing
+ * else. Clear site data, replace the phone, or let the browser evict storage, and the account
+ * is unreachable — everything the player earned is still on the server with no way to prove it
+ * is theirs. Wallet linking was the only answer, which excludes anyone without a wallet.
+ *
+ * A recovery code is a 100-bit secret the player can write down. The server stores only an
+ * HMAC of it, so it is shown exactly once and a database dump yields nothing usable.
+ */
+export interface RecoveryCreateResponse {
+  /** Plaintext, formatted in groups of five. Shown once and never retrievable again. */
+  code: string;
+  /** ISO timestamp the code was issued, so the UI can say which one is live. */
+  issuedAt: string;
+  /** True when this replaced an earlier code, which is now dead. */
+  replaced: boolean;
+}
+
+export interface RecoveryRedeemRequest {
+  code: string;
+  /**
+   * The device to move the account onto.
+   *
+   * Redemption has to rebind, not just hand out a cookie: `boot()` signs in with the device
+   * id on every launch, so a session alone would strand the player again the moment it
+   * expired. Same reserved-namespace rules as `/auth/guest`.
+   */
+  deviceId: string;
 }
 
 export interface WalletNonceRequest {
@@ -81,6 +122,8 @@ export interface ProfileUpdateRequest {
   tutorialDone?: boolean;
   /** Graphics preset. */
   quality?: Quality;
+  /** Recovery-code prompt shown. One-way: it can only be set true. */
+  recoveryAsked?: boolean;
 }
 
 /* --------------------------------------------------------------------- match */
@@ -262,4 +305,11 @@ export const API_ERRORS = {
   nothingToClaim: 'nothing_to_claim',
   walletTaken: 'wallet_taken',
   badSignature: 'bad_signature',
+  /** The code does not match any account. Deliberately says nothing about why. */
+  badRecoveryCode: 'bad_recovery_code',
+  /**
+   * The browser redeeming the code already has an account with progress on it. Recovering
+   * would abandon that progress, so it is refused rather than resolved by guessing.
+   */
+  recoveryConflict: 'recovery_conflict',
 } as const;

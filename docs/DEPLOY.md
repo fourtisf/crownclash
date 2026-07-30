@@ -80,7 +80,7 @@ time (so `pm2 resurrect` after a reboot reproduces the same environment a deploy
 
 | Variable | Notes |
 |---|---|
-| `AUTH_SECRET` | ≥16 chars. `openssl rand -hex 32`. Rotating it logs everyone out. |
+| `AUTH_SECRET` | ≥16 chars. `openssl rand -hex 32`. Rotating it logs everyone out **and invalidates every account-recovery code** — recovery codes are stored as an HMAC keyed on this value, so a rotation strands any player whose only way back was a code they wrote down. Treat it as permanent unless it leaks. |
 | `COOKIE_SECRET` | ≥16 chars, different value. Rotating it logs everyone out. |
 | `DATABASE_URL` | `postgresql://crown:…@localhost:5432/crown?schema=public` |
 | `REDIS_URL` | `redis://127.0.0.1:6379`. Optional in code, mandatory here — the in-process fallback is per-process and this box runs three processes. |

@@ -26,17 +26,22 @@ const BY_CODE: Record<string, string> = {
   [API_ERRORS.nothingToClaim]: STR.err.nothingToClaim,
   [API_ERRORS.walletTaken]: STR.err.walletTaken,
   [API_ERRORS.badSignature]: STR.err.badSignature,
+  [API_ERRORS.badRecoveryCode]: STR.err.badRecoveryCode,
+  [API_ERRORS.recoveryConflict]: STR.err.recoveryConflict,
 };
 
 export function apiMessage(err: unknown, fallback: string = STR.err.generic): string {
   if (err instanceof ApiFailure) {
     if (err.isOffline) return STR.err.offline;
-    // `isUnauthorized`/`isRateLimited` also match on status alone, so they run before the
-    // code table catches the cases where the body was not JSON and `code` is 'unknown'.
-    if (err.isUnauthorized) return STR.err.sessionExpired;
-    if (err.isRateLimited) return STR.err.tooFast;
+    // The code table goes first. It used to run *after* the status checks, which meant every
+    // 401 read as "your session expired" — including a mistyped recovery code, where the
+    // advice to reload the page is both wrong and the opposite of what the player should do.
+    // A body that was not JSON still leaves `code` as 'unknown', which is in no table, so the
+    // status checks below remain the backstop they were written to be.
     const known = BY_CODE[err.code];
     if (known) return known;
+    if (err.isUnauthorized) return STR.err.sessionExpired;
+    if (err.isRateLimited) return STR.err.tooFast;
     if (err.status >= 500) return STR.err.serverDown;
     return fallback;
   }

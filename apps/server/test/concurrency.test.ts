@@ -91,6 +91,18 @@ class SlowStore implements Store {
     await this.gap();
     return this.inner.userByWallet(wallet);
   }
+  async userByRecoveryHash(hash: string): Promise<UserRow | null> {
+    await this.gap();
+    return this.inner.userByRecoveryHash(hash);
+  }
+  async setRecoveryHash(userId: string, hash: string, at: Date): Promise<UserRow> {
+    await this.gap();
+    return this.inner.setRecoveryHash(userId, hash, at);
+  }
+  async adoptDevice(userId: string, deviceId: string): Promise<UserRow> {
+    await this.gap();
+    return this.inner.adoptDevice(userId, deviceId);
+  }
   async createUser(input: { deviceId: string; save: SaveState }): Promise<UserRow> {
     await this.gap();
     return this.inner.createUser(input);

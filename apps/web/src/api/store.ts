@@ -53,6 +53,8 @@ export interface BootResult {
   online: boolean;
   created: boolean;
   migrated: boolean;
+  /** Whether this account already has a recovery code. False when offline — nothing to ask. */
+  hasRecovery: boolean;
 }
 
 /**
@@ -78,7 +80,7 @@ export async function boot(): Promise<BootResult> {
     if (err instanceof ApiFailure && (err.isOffline || err.status >= 500)) {
       // Offline: keep playing against the cached save. Writes queue until we reconnect.
       Sready = !!cached;
-      return { online: false, created: false, migrated: false };
+      return { online: false, created: false, migrated: false, hasRecovery: false };
     }
     throw err;
   }
@@ -98,7 +100,7 @@ export async function boot(): Promise<BootResult> {
     }
   }
   if (!migrated) setSave(auth.save);
-  return { online: true, created: auth.created, migrated };
+  return { online: true, created: auth.created, migrated, hasRecovery: auth.hasRecovery };
 }
 
 /** Refresh from the server — used after reconnecting and on window focus. */
